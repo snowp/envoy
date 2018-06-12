@@ -64,23 +64,29 @@ void EdsClusterImpl::onConfigUpdate(const ResourceVector& resources, const std::
                                      cluster_load_assignment.cluster_name()));
   }
   for (const auto& locality_lb_endpoint : cluster_load_assignment.endpoints()) {
-    const uint32_t priority = locality_lb_endpoint.priority();
-    if (priority > 0 && !cluster_name_.empty() && cluster_name_ == cm_.localClusterName()) {
+    const uint32_t locality_priority = locality_lb_endpoint.priority();
+    if (locality_priority > 0 && !cluster_name_.empty() &&
+        cluster_name_ == cm_.localClusterName()) {
       throw EnvoyException(
           fmt::format("Unexpected non-zero priority for local cluster '{}'.", cluster_name_));
     }
-    if (priority_state.size() <= priority + 1) {
-      priority_state.resize(priority + 1);
+    if (priority_state.size() <= locality_priority + 1) {
+      priority_state.resize(locality_priority + 1);
     }
-    if (priority_state[priority].first == nullptr) {
-      priority_state[priority].first.reset(new HostVector());
+    auto& priority = priority_state[locality_priority];
+    if (priority.first == nullptr) {
+      priority.first.reset(new HostVector());
+    }
+    if (priority.second.find(locality_lb_endpoint.locality()) != priority.second.end()) {
+      ENVOY_LOG(warn, "Multiple ClusterLoadAssignment entries provided for the same locality in "
+                      "onConfigUpdate, collapsing.");
     }
     if (locality_lb_endpoint.has_locality() && locality_lb_endpoint.has_load_balancing_weight()) {
-      priority_state[priority].second[locality_lb_endpoint.locality()] =
+      priority.second[locality_lb_endpoint.locality()] =
           locality_lb_endpoint.load_balancing_weight().value();
     }
     for (const auto& lb_endpoint : locality_lb_endpoint.lb_endpoints()) {
-      priority_state[priority].first->emplace_back(new HostImpl(
+      priority.first->emplace_back(new HostImpl(
           info_, "", resolveProtoAddress(lb_endpoint.endpoint().address()), lb_endpoint.metadata(),
           lb_endpoint.load_balancing_weight().value(), locality_lb_endpoint.locality(),
           lb_endpoint.endpoint().health_check_config()));
@@ -88,7 +94,7 @@ void EdsClusterImpl::onConfigUpdate(const ResourceVector& resources, const std::
       if (health_status == envoy::api::v2::core::HealthStatus::UNHEALTHY ||
           health_status == envoy::api::v2::core::HealthStatus::DRAINING ||
           health_status == envoy::api::v2::core::HealthStatus::TIMEOUT) {
-        priority_state[priority].first->back()->healthFlagSet(Host::HealthFlag::FAILED_EDS_HEALTH);
+        priority.first->back()->healthFlagSet(Host::HealthFlag::FAILED_EDS_HEALTH);
       }
     }
   }

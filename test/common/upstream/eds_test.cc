@@ -10,6 +10,7 @@
 #include "test/mocks/runtime/mocks.h"
 #include "test/mocks/ssl/mocks.h"
 #include "test/mocks/upstream/mocks.h"
+#include "test/test_common/logging.h"
 #include "test/test_common/utility.h"
 
 #include "gmock/gmock.h"
@@ -1029,6 +1030,66 @@ TEST_F(EdsTest, PriorityAndLocalityWeighted) {
   cluster_load_assignment->mutable_endpoints(1)->mutable_load_balancing_weight()->set_value(40);
   VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources, ""));
   EXPECT_EQ(1UL, stats_.counter("cluster.name.update_no_rebuild").value());
+}
+
+TEST_F(EdsTest, LogWarningOnDuplicateLocalities) {
+  resetCluster(R"EOF(
+      name: name
+      connect_timeout: 0.25s
+      type: EDS
+      lb_policy: ROUND_ROBIN
+      common_lb_config:
+        locality_weighted_lb_config: {}
+      eds_cluster_config:
+        service_name: fare
+        eds_config:
+          api_config_source:
+            cluster_names:
+            - eds
+            refresh_delay: 1s
+    )EOF");
+
+  Protobuf::RepeatedPtrField<envoy::api::v2::ClusterLoadAssignment> resources;
+  auto* cluster_load_assignment = resources.Add();
+  cluster_load_assignment->set_cluster_name("fare");
+  uint32_t port = 1000;
+  auto add_locality = [cluster_load_assignment, &port](const std::string& region,
+                                                       const std::string& zone,
+                                                       const std::string& sub_zone) {
+    auto* endpoints = cluster_load_assignment->add_endpoints();
+    auto* locality = endpoints->mutable_locality();
+    locality->set_region(region);
+    locality->set_zone(zone);
+    locality->set_sub_zone(sub_zone);
+    endpoints->mutable_load_balancing_weight()->set_value(128);
+
+    auto* socket_address = endpoints->add_lb_endpoints()
+                               ->mutable_endpoint()
+                               ->mutable_address()
+                               ->mutable_socket_address();
+    socket_address->set_address("1.2.3.4");
+    socket_address->set_port_value(port++);
+  };
+
+  add_locality("oceania", "koala", "ingsoc");
+  add_locality("oceania", "koala", "not-ingsoc");
+
+  cluster_->initialize([] {});
+
+  EXPECT_LOG_NOT_CONTAINS("warning",
+                          "Multiple ClusterLoadAssignment entries provided for the same locality "
+                          "in onConfigUpdate, collapsing.",
+                          cluster_->onConfigUpdate(resources, ""));
+
+  cluster_load_assignment->clear_endpoints();
+
+  add_locality("oceania", "koala", "ingsoc");
+  add_locality("oceania", "koala", "ingsoc");
+
+  EXPECT_LOG_CONTAINS("warning",
+                      "Multiple ClusterLoadAssignment entries provided for the same locality in "
+                      "onConfigUpdate, collapsing.",
+                      cluster_->onConfigUpdate(resources, ""));
 }
 
 // Throw on adding a new resource with an invalid endpoint (since the given address is invalid).
