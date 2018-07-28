@@ -187,6 +187,7 @@ envoy_cc_test(
         "//source/extensions/filters/http/buffer:config",
         "//source/extensions/filters/http/dynamo:config",
         "//source/extensions/filters/http/grpc_http1_bridge:config",
+        "//source/extensions/filters/http/http1_grpc_bridge:config",
         "//source/extensions/filters/http/health_check:config",
         "//source/extensions/filters/http/ratelimit:config",
         "//source/extensions/filters/http/router:config",

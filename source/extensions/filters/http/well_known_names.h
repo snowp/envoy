@@ -22,6 +22,8 @@ public:
   const std::string Fault = "envoy.fault";
   // GRPC http1 bridge filter
   const std::string GrpcHttp1Bridge = "envoy.grpc_http1_bridge";
+  // http1 GRPC bridge filter
+  const std::string Http1GrpcBridge = "envoy.filters.http.http1_grpc_bridge";
   // GRPC json transcoder filter
   const std::string GrpcJsonTranscoder = "envoy.grpc_json_transcoder";
   // GRPC web filter
