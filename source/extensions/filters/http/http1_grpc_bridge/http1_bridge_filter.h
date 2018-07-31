@@ -2,6 +2,7 @@
 
 #include "envoy/http/filter.h"
 #include "envoy/upstream/cluster_manager.h"
+#include "common/buffer/buffer_impl.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -19,12 +20,8 @@ public:
 
   // Http::StreamDecoderFilter
   Http::FilterHeadersStatus decodeHeaders(Http::HeaderMap& headers, bool end_stream) override;
-  Http::FilterDataStatus decodeData(Buffer::Instance&, bool) override {
-    return Http::FilterDataStatus::Continue;
-  }
-  Http::FilterTrailersStatus decodeTrailers(Http::HeaderMap&) override {
-    return Http::FilterTrailersStatus::Continue;
-  }
+  Http::FilterDataStatus decodeData(Buffer::Instance&, bool) override;
+  Http::FilterTrailersStatus decodeTrailers(Http::HeaderMap&) override { return Http::FilterTrailersStatus::Continue; }
   void setDecoderFilterCallbacks(Http::StreamDecoderFilterCallbacks& callbacks) override {
     decoder_callbacks_ = &callbacks;
   }
@@ -52,6 +49,9 @@ private:
   Upstream::ClusterInfoConstSharedPtr cluster_;
   std::string grpc_service_;
   std::string grpc_method_;
+  bool data_written_;
+  bool data_drained_;
+  Buffer::OwnedImpl buffer_;
 };
 
 } // namespace GrpcHttp1Bridge

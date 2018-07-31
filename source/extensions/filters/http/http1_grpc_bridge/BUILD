@@ -20,6 +20,7 @@ envoy_cc_library(
         "//include/envoy/http:filter_interface",
         "//include/envoy/upstream:cluster_manager_interface",
         "//source/common/common:enum_to_int",
+        "//source/common/buffer:buffer_lib",
         "//source/common/common:utility_lib",
         "//source/common/grpc:common_lib",
         "//source/common/http:headers_lib",

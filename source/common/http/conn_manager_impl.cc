@@ -1058,12 +1058,11 @@ void ConnectionManagerImpl::ActiveStream::encodeHeaders(ActiveStreamEncoderFilte
   }
 }
 
-void ConnectionManagerImpl::ActiveStream::addEncodedTrailers(
-    const std::function<void(Http::HeaderMap&)>& trailer_map_cb) {
+Http::HeaderMap& ConnectionManagerImpl::ActiveStream::addEncodedTrailers() {
   if (!response_trailers_) {
     response_trailers_ = std::make_unique<Http::HeaderMapImpl>();
   }
-  trailer_map_cb(*response_trailers_);
+  return *response_trailers_;
 }
 
 void ConnectionManagerImpl::ActiveStream::addEncodedData(ActiveStreamEncoderFilter& filter,
@@ -1486,9 +1485,8 @@ void ConnectionManagerImpl::ActiveStreamEncoderFilter::addEncodedData(Buffer::In
   return parent_.addEncodedData(*this, data, streaming);
 }
 
-void ConnectionManagerImpl::ActiveStreamEncoderFilter::addEncodedTrailers(
-    const std::function<void(Http::HeaderMap&)>& trailer_map_cb) {
-  return parent_.addEncodedTrailers(trailer_map_cb);
+HeaderMap& ConnectionManagerImpl::ActiveStreamEncoderFilter::addEncodedTrailers() {
+  return parent_.addEncodedTrailers();
 }
 
 void ConnectionManagerImpl::ActiveStreamEncoderFilter::

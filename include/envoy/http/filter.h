@@ -395,7 +395,7 @@ public:
    */
   virtual void addEncodedData(Buffer::Instance& data, bool streaming_filter) PURE;
 
-  virtual void addEncodedTrailers(const std::function<void(HeaderMap&)>& trailer_map_cb) PURE;
+  virtual HeaderMap& addEncodedTrailers() PURE;
 
   /**
    * Called when an encoder filter goes over its high watermark.
