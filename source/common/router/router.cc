@@ -589,6 +589,9 @@ void Filter::onUpstreamHeaders(const uint64_t response_code, Http::HeaderMapPtr&
   }
 
   if (retry_state_) {
+    if (upstream_request_ && upstream_request_->upstream_host_) {
+      attempted_hosts.emplace_back(upstream_request_->upstream_host_);
+    }
     RetryStatus retry_status = retry_state_->shouldRetry(
         headers.get(), absl::optional<Http::StreamResetReason>(), [this]() -> void { doRetry(); });
     // Capture upstream_host since setupRetry() in the following line will clear

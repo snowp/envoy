@@ -197,13 +197,33 @@ public:
   const Network::Connection* downstreamConnection() const override {
     return callbacks_->connection();
   }
+
   const Http::HeaderMap* downstreamHeaders() const override { return downstream_headers_; }
+
   absl::optional<std::function<bool(uint32_t, const Upstream::Host&)>>
   prePrioritySelectionFilter() override {
-    return {};
+    using namespace std::placeholders;
+    auto host_filter = [this](auto, const auto& h) { return postHostSelectionFilter(h); };
+    if (attempted_hosts.size() > 2) {
+      return {[&host_filter, this](auto p, const auto& h) {
+        return host_filter(p, h) &&
+               (h.locality().zone() != (*(attempted_hosts.end() - 1))->locality().zone());
+      }};
+    } else {
+      return {host_filter};
+    }
   }
-  bool postHostSelectionFilter(const Upstream::Host&) override { return true; }
-  uint32_t hostSelectionRetryCount() override { return 0; }
+
+  bool postHostSelectionFilter(const Upstream::Host& candidate) override {
+    for (const auto& h : attempted_hosts) {
+      if (h->address()->asString() == candidate.address()->asString()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  uint32_t hostSelectionRetryCount() override { return 5; }
   /**
    * Set a computed cookie to be sent with the downstream headers.
    * @param key supplies the size of the cookie
@@ -230,6 +250,7 @@ public:
 
 protected:
   RetryStatePtr retry_state_;
+  std::vector<Upstream::HostDescriptionConstSharedPtr> attempted_hosts;
 
 private:
   struct UpstreamRequest : public Http::StreamDecoder,
@@ -347,8 +368,8 @@ private:
   void sendNoHealthyUpstreamResponse();
   bool setupRetry(bool end_stream);
   void doRetry();
-  // Called immediately after a non-5xx header is received from upstream, performs stats accounting
-  // and handle difference between gRPC and non-gRPC requests.
+  // Called immediately after a non-5xx header is received from upstream, performs stats
+  // accounting and handle difference between gRPC and non-gRPC requests.
   void handleNon5xxResponseHeaders(const Http::HeaderMap& headers, bool end_stream);
 
   FilterConfig& config_;
