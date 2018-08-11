@@ -203,7 +203,8 @@ public:
   absl::optional<std::function<bool(uint32_t, const Upstream::Host&)>>
   prePrioritySelectionFilter() override {
     using namespace std::placeholders;
-    auto host_filter = [this](auto, const auto& h) -> bool { return postHostSelectionFilter(h); };
+    // requires this-> due to gcc bug: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=67274
+    auto host_filter = [this](auto, const auto& h) -> bool { return this->postHostSelectionFilter(h); };
     if (attempted_hosts.size() > 2) {
       return {[&host_filter, this](auto p, const auto& h) -> bool {
         return host_filter(p, h) &&
