@@ -203,9 +203,9 @@ public:
   absl::optional<std::function<bool(uint32_t, const Upstream::Host&)>>
   prePrioritySelectionFilter() override {
     using namespace std::placeholders;
-    auto host_filter = [this](auto, const auto& h) { return postHostSelectionFilter(h); };
+    auto host_filter = [this](auto, const auto& h) -> bool { return postHostSelectionFilter(h); };
     if (attempted_hosts.size() > 2) {
-      return {[&host_filter, this](auto p, const auto& h) {
+      return {[&host_filter, this](auto p, const auto& h) -> bool {
         return host_filter(p, h) &&
                (h.locality().zone() != (*(attempted_hosts.end() - 1))->locality().zone());
       }};
