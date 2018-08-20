@@ -140,6 +140,12 @@ public:
   const RateLimitPolicy& rateLimitPolicy() const override { return rate_limit_policy_; }
   const Config& routeConfig() const override;
   const RouteSpecificFilterConfig* perFilterConfig(const std::string&) const override;
+  Upstream::RetryPriorityFilterSharedPtr retryPriorityFilter() override {
+    return nullptr;
+  } // TODO: implement
+  Upstream::RetryHostFilterSharedPtr retryHostFilter() override {
+    return nullptr;
+  } // TODO: implement
 
 private:
   enum class SslRequirements { NONE, EXTERNAL_ONLY, ALL };
