@@ -140,10 +140,8 @@ public:
   const RateLimitPolicy& rateLimitPolicy() const override { return rate_limit_policy_; }
   const Config& routeConfig() const override;
   const RouteSpecificFilterConfig* perFilterConfig(const std::string&) const override;
-  Upstream::RetryPriorityFilterSharedPtr retryPriorityFilter() override {
-    return nullptr;
-  } // TODO: implement
-  Upstream::RetryHostFilterSharedPtr retryHostFilter() override {
+  Upstream::RetryPrioritySharedPtr retryPriority() override { return nullptr; } // TODO: implement
+  Upstream::RetryHostPredicateSharedPtr retryHostPredicate() override {
     return nullptr;
   } // TODO: implement
 

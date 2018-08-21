@@ -105,23 +105,23 @@ message VirtualHost {
   // for if and how it is utilized.
   map<string, google.protobuf.Struct> per_filter_config = 12;
 
-  message RetryPriorityFilter {
+  message RetryPriority {
     string name = 1;
     google.protobuf.Struct config = 2;
   }
 
-  // Specifies an implementation of a RetryPriorityFilter which will modify the priority load
-  // during retries.
-  RetryPriorityFilter retry_priority_filter = 13;
+  // Specifies an implementation of a RetryPriority which is used to determine the
+  // priority load used for retries.
+  RetryPriority retry_priority = 13;
 
-  message RetryHostFilter {
+  message RetryHostPredicate {
     string name = 1;
     google.protobuf.Struct config = 2;
   }
 
-  // Specifies a collection of RetryHostFilter that will be consulted when selecting a host for
-  // retries. If any of the filters reject the host, host selection will be reattempted.
-  repeated RetryHostFilter retry_host_filter = 14;
+  // Specifies a collection of RetryHostPredicates that will be consulted when selecting a host for
+  // retries. If any of the predicates reject the host, host selection will be reattempted.
+  repeated RetryHostPredicate retry_host_predicate = 14;
 
   // The maximum number of times host selection will be reattempted before giving up, at which point
   // the host that was last selected will be routed to.

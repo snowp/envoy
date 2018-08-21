@@ -94,8 +94,8 @@ envoy_cc_library(
 )
 
 envoy_cc_library(
-    name = "retry_filter_interface",
-    hdrs = ["retry_filter.h"],
+    name = "retry_interface",
+    hdrs = ["retry.h"],
     deps = [
         "//include/envoy/upstream:upstream_interface",
         ],

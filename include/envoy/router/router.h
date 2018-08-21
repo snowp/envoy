@@ -16,7 +16,7 @@
 #include "envoy/http/websocket.h"
 #include "envoy/tracing/http_tracer.h"
 #include "envoy/upstream/resource_manager.h"
-#include "envoy/upstream/retry_filter.h"
+#include "envoy/upstream/retry.h"
 
 #include "common/protobuf/protobuf.h"
 #include "common/protobuf/utility.h"
@@ -301,18 +301,18 @@ public:
   }
 
   /**
-   * Returns a new RetryPriorityFilter to be used for this VirtualHost.
+   * Returns a new RetryPriority to be used for this VirtualHost.
    *
-   * @return pointer to a new RetryPriorityFilter, or nullptr if no filter is configured.
+   * @return pointer to a new RetryPriority, or nullptr if no filter is configured.
    */
-  virtual Upstream::RetryPriorityFilterSharedPtr retryPriorityFilter() PURE;
+  virtual Upstream::RetryPrioritySharedPtr retryPriority() PURE;
 
   /**
-   * Returns a new RetryHostFilter to be used for this VirtualHost.
+   * Returns a new RetryHostPredicate to be used for this VirtualHost.
    *
-   * @return pointer to a new RetryHostFilter, or nullptr if no filter is configured.
+   * @return pointer to a new RetryHostPredicate, or nullptr if no filter is configured.
    */
-  virtual Upstream::RetryHostFilterSharedPtr retryHostFilter() PURE;
+  virtual Upstream::RetryHostPredicateSharedPtr retryHostPredicate() PURE;
 };
 
 /**
