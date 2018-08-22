@@ -208,7 +208,7 @@ public:
     if (attempted_hosts.size() > 2) {
       return {[&host_filter, this](auto p, const auto& h) -> bool {
         return host_filter(p, h) &&
-               (h.locality().zone() != (*(attempted_hosts.end() - 1))->locality().zone());
+               (h.locality().zone() != (attempted_hosts[attempted_hosts.size() - 1])->locality().zone());
       }};
     } else {
       return {host_filter};
