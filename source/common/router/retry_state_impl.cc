@@ -216,6 +216,9 @@ bool RetryStateImpl::wouldRetry(const Http::HeaderMap* response_headers,
     if (code == Http::Code::Conflict) {
       return true;
     }
+    if (code == Http::Code::TooManyRequests) {
+      return true;
+    }
   }
 
   if (retry_on_ &
