@@ -211,7 +211,12 @@ public:
         // Attempt 4: skip P from 2
         // Attempt 5: skip P from 4
         // etc.
-        return (h.locality().zone() != (attempted_hosts[attempted_hosts.size() - (1 + (attempted_hosts.size() % 2))])->locality().zone());
+        std::cout << "ATTEMPTED HOSTS" << std::endl;
+        std::for_each(attempted_hosts.begin(), attempted_hosts.end(), [](const auto& h) { std::cout << h->locality().zone() << std::endl; });
+        auto index = attempted_hosts.size() - (1 + (attempted_hosts.size() % 2));
+        std::cout << "USING INDEX=" << index << std::endl;
+
+        return (h.locality().zone() != (attempted_hosts[index])->locality().zone());
       }};
     } else {
       return {};
