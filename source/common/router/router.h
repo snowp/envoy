@@ -202,7 +202,7 @@ public:
 
   absl::optional<std::function<bool(uint32_t, const Upstream::Host&)>>
   prePrioritySelectionFilter() override {
-    if (attempted_hosts.size() > 2) {
+    if (attempted_hosts.size() >= 2) {
       return {[this](auto, const auto& h) -> bool {
         // The % part means that on even attempts we look at the latest attempt,
         // while on odd attempts we look at the second to last. This gives us:
