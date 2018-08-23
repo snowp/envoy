@@ -206,7 +206,7 @@ public:
     // requires this-> due to gcc bug: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=67274
     auto host_filter = [this](auto, const auto& h) -> bool { return this->postHostSelectionFilter(h); };
     if (attempted_hosts.size() > 2) {
-      return {[&host_filter, this](auto p, const auto& h) -> bool {
+      return {[host_filter, this](auto p, const auto& h) -> bool {
         return host_filter(p, h) &&
                (h.locality().zone() != (attempted_hosts[attempted_hosts.size() - 1])->locality().zone());
       }};
