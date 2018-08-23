@@ -202,11 +202,16 @@ public:
 
   absl::optional<std::function<bool(uint32_t, const Upstream::Host&)>>
   prePrioritySelectionFilter() override {
-    using namespace std::placeholders;
-    // requires this-> due to gcc bug: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=67274
     if (attempted_hosts.size() > 2) {
       return {[this](auto, const auto& h) -> bool {
-        return (h.locality().zone() != (attempted_hosts[attempted_hosts.size() - 1])->locality().zone());
+        // The % part means that on even attempts we look at the latest attempt,
+        // while on odd attempts we look at the second to last. This gives us:
+        // Attempt 1-2: nothing
+        // Attempt 3: skip P from 2
+        // Attempt 4: skip P from 2
+        // Attempt 5: skip P from 4
+        // etc.
+        return (h.locality().zone() != (attempted_hosts[attempted_hosts.size() - (1 + (attempted_hosts.size() % 2))])->locality().zone());
       }};
     } else {
       return {};
