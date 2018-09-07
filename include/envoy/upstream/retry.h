@@ -36,7 +36,7 @@ public:
    *
    * @param attempted_host the host that was previously attempted.
    */
-  virtual void onHostAttempted(HostSharedPtr attempted_host) PURE;
+  virtual void onHostAttempted(HostDescriptionConstSharedPtr attempted_host) PURE;
 };
 
 typedef std::shared_ptr<RetryPriority> RetryPrioritySharedPtr;
@@ -67,7 +67,7 @@ public:
    *
    * @param attempted_host the host that was previously attempted.
    */
-  virtual void onHostAttempted(HostSharedPtr attempted_host) PURE;
+  virtual void onHostAttempted(HostDescriptionConstSharedPtr attempted_host) PURE;
 };
 
 typedef std::shared_ptr<RetryHostPredicate> RetryHostPredicateSharedPtr;
