@@ -116,6 +116,11 @@ public:
   virtual ~RetryHostPredicateFactory() {}
 
   virtual void createHostPredicate(RetryHostPredicateFactoryCallbacks& callbacks) PURE;
+
+  /**
+   * @return name name of this factory.
+   */
+  virtual std::string name() PURE;
 };
 
 } // namespace Upstream

@@ -1094,6 +1094,7 @@ Http::ConnectionPool::Instance*
 ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::connPool(
     ResourcePriority priority, Http::Protocol protocol, LoadBalancerContext* context) {
   HostConstSharedPtr host = lb_->chooseHost(context);
+  std::cout << "cm I CHOOSE YOU!:" << host->address()->asString() << std::endl;
   if (!host) {
     ENVOY_LOG(debug, "no healthy host for HTTP connection pool");
     cluster_info_->stats().upstream_cx_none_healthy_.inc();

@@ -237,6 +237,7 @@ AssertionResult FakeConnectionBase::enableHalfClose(bool enable,
 Http::StreamDecoder& FakeHttpConnection::newStream(Http::StreamEncoder& encoder) {
   Thread::LockGuard lock(lock_);
   new_streams_.emplace_back(new FakeStream(*this, encoder));
+  std::cout << "new stream" << std::endl;
   connection_event_.notifyOne();
   return *new_streams_.back();
 }
@@ -276,6 +277,7 @@ AssertionResult FakeConnectionBase::waitForHalfClose(bool ignore_spurious_events
     if (std::chrono::steady_clock::now() >= end_time) {
       return AssertionFailure() << "Timed out waiting for half close.";
     }
+    std::cout << "hc" << std::endl;
     connection_event_.waitFor(lock_, 5ms); // Safe since CondVar::waitFor won't throw.
     // The default behavior of waitForHalfClose is to assume the test cleanly
     // calls waitForData, waitForNewStream, etc. to handle all events on the
@@ -540,6 +542,7 @@ Network::FilterStatus FakeRawConnection::ReadFilter::onData(Buffer::Instance& da
   parent_.data_.append(data.toString());
   parent_.half_closed_ = end_stream;
   data.drain(data.length());
+  std::cout << "new data" << std::endl;
   parent_.connection_event_.notifyOne();
   return Network::FilterStatus::StopIteration;
 }

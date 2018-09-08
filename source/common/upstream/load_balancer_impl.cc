@@ -289,6 +289,8 @@ HostConstSharedPtr LoadBalancerBase::chooseHost(LoadBalancerContext* context) {
     }
   }
 
+  std::cout << "I CHOOSE: " << host->address()->asString() << std::endl;
+
   // If we didnt find anything, return the last host.
   return host;
 }

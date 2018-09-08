@@ -265,6 +265,7 @@ void BaseIntegrationTest::createUpstreams() {
 void BaseIntegrationTest::createEnvoy() {
   std::vector<uint32_t> ports;
   for (auto& upstream : fake_upstreams_) {
+    std::cout << upstream->localAddress()->ip()->port() << std::endl;
     if (upstream->localAddress()->ip()) {
       ports.push_back(upstream->localAddress()->ip()->port());
     }
