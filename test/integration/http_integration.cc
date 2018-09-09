@@ -249,11 +249,11 @@ uint64_t HttpIntegrationTest::waitForNextUpstreamRequest(uint64_t upstream_index
   uint64_t upstream_with_request = upstream_index;
   // If there is no upstream connection, wait for it to be established.
   if (!fake_upstream_connection_) {
-    std::cout << "checking first" << std::endl;
     AssertionResult result = fake_upstreams_[upstream_index]->waitForHttpConnection(
         *dispatcher_, fake_upstream_connection_);
+
+    // If we didn't get a connection against the first upstream, try the next one.
     if (!result && upstream_index != second_upstream_index) {
-    std::cout << "checking second" << std::endl;
       upstream_with_request = second_upstream_index;
       result = fake_upstreams_[second_upstream_index]->waitForHttpConnection(
           *dispatcher_, fake_upstream_connection_);
@@ -762,7 +762,8 @@ void HttpIntegrationTest::testRetryHostPredicateFilter() {
   envoy::api::v2::route::RouteAction::RetryPolicy retry_policy;
   retry_policy.add_retry_host_predicate()->set_name("test-host-predicate");
 
-  config_helper_.addRoute("foo.com", "/unknown", "unknown_cluster", false,
+  // Add route with custom retry policy
+  config_helper_.addRoute("host", "/test_retry", "cluster_0", false,
                           envoy::api::v2::route::RouteAction::NOT_FOUND,
                           envoy::api::v2::route::VirtualHost::NONE, retry_policy);
 
@@ -770,14 +771,13 @@ void HttpIntegrationTest::testRetryHostPredicateFilter() {
   config_helper_.addConfigModifier([](envoy::config::bootstrap::v2::Bootstrap& bootstrap) {
       auto* new_host = bootstrap.mutable_static_resources()->mutable_clusters(0)->add_hosts();
       new_host->MergeFrom(bootstrap.static_resources().clusters(0).hosts(0));
-      new_host->mutable_socket_address()->set_port_value(123);
       });
   fake_upstreams_count_ = 2;
   initialize();
   codec_client_ = makeHttpConnection(lookupPort("http"));
   auto response =
       codec_client_->makeRequestWithBody(Http::TestHeaderMapImpl{{":method", "POST"},
-                                                                 {":path", "/test/long/url"},
+                                                                 {":path", "/test_retry"},
                                                                  {":scheme", "http"},
                                                                  {":authority", "host"},
                                                                  {"x-forwarded-for", "10.0.0.1"},
@@ -787,7 +787,13 @@ void HttpIntegrationTest::testRetryHostPredicateFilter() {
   // Note how we're exepcting each upstream request to hit the same upstream.
   auto upstream_idx = waitForNextUpstreamRequest(0, 1);
   upstream_request_->encodeHeaders(Http::TestHeaderMapImpl{{":status", "503"}}, false);
-  upstream_request_->encodeData(512, true);
+
+  if (fake_upstreams_[upstream_idx]->httpType() == FakeHttpConnection::Type::HTTP1) {
+    ASSERT_TRUE(fake_upstream_connection_->waitForDisconnect());
+    ASSERT_TRUE(fake_upstreams_[upstream_idx]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));
+  } else {
+    ASSERT_TRUE(upstream_request_->waitForReset());
+  }
 
   waitForNextUpstreamRequest(upstream_idx);
   upstream_request_->encodeHeaders(Http::TestHeaderMapImpl{{":status", "200"}}, false);
