@@ -22,13 +22,13 @@ public:
   /**
    * Determines what PriorityLoad to use.
    *
-   * @param priority_state current state of cluster.
+   * @param priority_set current priority set of cluster.
    * @param original_priority the unmodified PriorityLoad.
    * @return a reference to the PriorityLoad to use. Return original_priority if no changes should
    * be made.
    */
-  virtual PriorityLoad& determinePriorityLoad(const PriorityState& priority_state,
-                                              const PriorityLoad& original_priority) PURE;
+  virtual const PriorityLoad& determinePriorityLoad(const PrioritySet& priority_set,
+                                                    const PriorityLoad& original_priority) PURE;
 
   /**
    * Called after a host has been attempted but before host selection for the next attempt has
@@ -106,6 +106,8 @@ public:
   virtual ~RetryPriorityFactory() {}
 
   virtual void createRetryPriority(RetryPriorityFactoryCallbacks& callbacks) PURE;
+
+  virtual std::string name() const PURE;
 };
 
 /**

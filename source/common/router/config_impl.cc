@@ -57,6 +57,16 @@ RetryPolicyImpl::RetryPolicyImpl(const envoy::api::v2::route::RouteAction& confi
     ASSERT(factory);
     factory->createHostPredicate(*this);
   }
+
+  const auto retry_priority = config.retry_policy().retry_priority();
+  if (!retry_priority.name().empty()) {
+    // TODO(snowp): support passing the config Struct during intialization.
+    auto factory = Registry::FactoryRegistry<Upstream::RetryPriorityFactory>::getFactory(
+        retry_priority.name());
+
+    ASSERT(factory);
+    factory->createRetryPriority(*this);
+  }
 }
 
 CorsPolicyImpl::CorsPolicyImpl(const envoy::api::v2::route::CorsPolicy& config) {

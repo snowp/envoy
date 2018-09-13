@@ -215,6 +215,18 @@ public:
     return retry_state_->shouldSelectAnotherHost(host);
   }
 
+  const Upstream::PriorityLoad&
+  determinePriorityLoad(const Upstream::PrioritySet& priority_set,
+                        const Upstream::PriorityLoad& original_priority_load) override {
+    // We only modify the priority load on retries.
+    if (!is_retry_) {
+      return original_priority_load;
+    }
+
+    ASSERT(retry_state_);
+    return retry_state_->priorityLoadForRetry(priority_set, original_priority_load);
+  }
+
   /**
    * Set a computed cookie to be sent with the downstream headers.
    * @param key supplies the size of the cookie
