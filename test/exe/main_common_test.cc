@@ -102,6 +102,12 @@ TEST_P(MainCommonTest, ConstructDestructHotRestartDisabled) {
   VERBOSE_EXPECT_NO_THROW(MainCommon main_common(argc(), argv()));
 }
 
+// Verifies that the Logger::Registry is usable after constructing and destructing MainCommon.
+TEST_P(MainCommonTest, ConstructDestructLogger) {
+  VERBOSE_EXPECT_NO_THROW(MainCommon main_common(argc(), argv()));
+  Logger::Registry::getSink()->log({});
+}
+
 // Exercise init_only explicitly.
 TEST_P(MainCommonTest, ConstructDestructHotRestartDisabledNoInit) {
   addArg("--disable-hot-restart");
