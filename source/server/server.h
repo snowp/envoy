@@ -186,6 +186,10 @@ public:
     return config_->statsFlushInterval();
   }
 
+  InitManagerImpl::State initState() const {
+    return init_manager_.state();
+  }
+
 private:
   ProtobufTypes::MessagePtr dumpBootstrapConfig();
   void flushStats();

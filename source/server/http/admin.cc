@@ -14,7 +14,9 @@
 #include "envoy/admin/v2alpha/clusters.pb.h"
 #include "envoy/admin/v2alpha/config_dump.pb.h"
 #include "envoy/admin/v2alpha/memory.pb.h"
+#include "envoy/admin/v2alpha/server_status.pb.h"
 #include "envoy/filesystem/filesystem.h"
+#include "envoy/init/init.h"
 #include "envoy/runtime/runtime.h"
 #include "envoy/server/hot_restart.h"
 #include "envoy/server/instance.h"
@@ -527,6 +529,26 @@ Http::Code AdminImpl::handlerServerInfo(absl::string_view, Http::HeaderMap&,
   return Http::Code::OK;
 }
 
+Http::Code AdminImpl::handlerServerStatus(absl::string_view, Http::HeaderMap&, Buffer::Instance& response, AdminStream&) {
+  envoy::admin::v2alpha::ServerStatus status;
+  switch (server_.initManager().state()) {
+    case Init::Manager::State::NotInitialized:
+    status.set_init_state(envoy::admin::v2alpha::ServerStatus::NOT_INITIALIZED);
+    break;
+  case Init::Manager::State::Initializing:
+    status.set_init_state(envoy::admin::v2alpha::ServerStatus::INITIALIZING);
+    break;
+  case Init::Manager::State::Initialized:
+    status.set_init_state(envoy::admin::v2alpha::ServerStatus::INITIALIZED);
+     break;
+  default:
+     NOT_REACHED_GCOVR_EXCL_LINE;
+  }
+
+  response.add(MessageUtil::getJsonStringFromMessage(status, true));
+  return Http::Code::OK;
+}
+
 Http::Code AdminImpl::handlerStats(absl::string_view url, Http::HeaderMap& response_headers,
                                    Buffer::Instance& response, AdminStream& admin_stream) {
   Http::Code rc = Http::Code::OK;
@@ -955,6 +977,8 @@ AdminImpl::AdminImpl(const std::string& profile_path, Server::Instance& server)
            MAKE_ADMIN_HANDLER(handlerResetCounters), false, true},
           {"/server_info", "print server version/status information",
            MAKE_ADMIN_HANDLER(handlerServerInfo), false, false},
+          {"/server_status", "print server startup information",
+           MAKE_ADMIN_HANDLER(handlerServerStatus), false, false},
           {"/stats", "print server stats", MAKE_ADMIN_HANDLER(handlerStats), false, false},
           {"/stats/prometheus", "print server stats in prometheus format",
            MAKE_ADMIN_HANDLER(handlerPrometheusStats), false, false},

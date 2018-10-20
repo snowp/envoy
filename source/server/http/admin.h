@@ -231,6 +231,8 @@ private:
                                   AdminStream&);
   Http::Code handlerServerInfo(absl::string_view path_and_query, Http::HeaderMap& response_headers,
                                Buffer::Instance& response, AdminStream&);
+  Http::Code handlerServerStatus(absl::string_view path_and_query, Http::HeaderMap& response_headers,
+                               Buffer::Instance& response, AdminStream&);
   Http::Code handlerStats(absl::string_view path_and_query, Http::HeaderMap& response_headers,
                           Buffer::Instance& response, AdminStream&);
   Http::Code handlerPrometheusStats(absl::string_view path_and_query,

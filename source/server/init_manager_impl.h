@@ -18,13 +18,14 @@ public:
   // Init::Manager
   void registerTarget(Init::Target& target) override;
 
+  // Returns state of the InitManager.
+  State state() const override { return state_; }
 private:
-  enum class State { NotInitialized, Initializing, Initialized };
 
   void initializeTarget(Init::Target& target);
 
   std::list<Init::Target*> targets_;
-  State state_{State::NotInitialized};
+  State state_{Init::Manager::State::NotInitialized};
   std::function<void()> callback_;
 };
 

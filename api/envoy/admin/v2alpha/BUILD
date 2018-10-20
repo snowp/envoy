@@ -43,3 +43,9 @@ api_proto_library_internal(
     srcs = ["certs.proto"],
     visibility = ["//visibility:public"],
 )
+
+api_proto_library_internal(
+    name = "server_status",
+    srcs = ["server_status.proto"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package envoy.admin.v2alpha;
+
+// [#protodoc-title: Server State]
+
+// Proto representation of the internal server state. Used to determine where
+// in the server lifecycle Envoy is in.
+
+message ServerStatus {
+  enum InitState {
+    // ClusterManager has not been initalized.
+    NOT_INITIALIZED = 0;
+    // ClusterManager has been initalized, init hooks are running.
+    INITIALIZING = 1;
+    // Init hooks have finished running, Envoy should be ready to receive traffic.
+    INITIALIZED = 2;
+  }
+
+  // The initalization state of the Envoy server. 
+  InitState init_state = 1;
+}
