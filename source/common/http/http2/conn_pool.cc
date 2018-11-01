@@ -174,6 +174,7 @@ void ConnPoolImpl::onConnectionEvent(ActiveClient& client, Network::ConnectionEv
 }
 
 void ConnPoolImpl::movePrimaryClientToDraining() {
+  std::cout << "DRAINING" << std::endl;
   ENVOY_CONN_LOG(debug, "moving primary to draining", *primary_client_->client_);
   if (draining_client_) {
     // This should pretty much never happen, but is possible if we start draining and then get

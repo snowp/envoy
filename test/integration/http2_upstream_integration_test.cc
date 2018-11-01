@@ -10,6 +10,8 @@
 
 #include "gtest/gtest.h"
 
+using namespace std::chrono_literals;
+
 namespace Envoy {
 
 INSTANTIATE_TEST_CASE_P(IpVersions, Http2UpstreamIntegrationTest,
@@ -293,6 +295,7 @@ TEST_P(Http2UpstreamIntegrationTest, UpstreamConnectionCloseWithManyStreams) {
   config_helper_.setBufferLimits(1024, 1024); // Set buffer limits upstream and downstream.
   TestRandomGenerator rand;
   const uint32_t num_requests = rand.random() % 50 + 1;
+  std::cout << num_requests << std::endl;
   std::vector<Http::StreamEncoder*> encoders;
   std::vector<IntegrationStreamDecoderPtr> responses;
   std::vector<FakeStreamPtr> upstream_requests;
@@ -316,17 +319,21 @@ TEST_P(Http2UpstreamIntegrationTest, UpstreamConnectionCloseWithManyStreams) {
   ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));
   for (uint32_t i = 0; i < num_requests; ++i) {
     upstream_requests.emplace_back();
-    FakeStreamPtr stream;
     if (i % 15 != 0) {
       ASSERT_TRUE(
           fake_upstream_connection_->waitForNewStream(*dispatcher_, upstream_requests.back()));
     }
   }
+  std::unordered_set<size_t> reset_requests;
   for (uint32_t i = 0; i < num_requests; ++i) {
     if (i % 15 != 0) {
-      ASSERT_TRUE(upstream_requests[i]->waitForEndStream(*dispatcher_));
-      upstream_requests[i]->encodeHeaders(Http::TestHeaderMapImpl{{":status", "200"}}, false);
-      upstream_requests[i]->encodeData(100, false);
+      if (upstream_requests[i]->waitForEndStream(*dispatcher_)) {
+        upstream_requests[i]->encodeHeaders(Http::TestHeaderMapImpl{{":status", "200"}}, false);
+        upstream_requests[i]->encodeData(100, false); 
+      } else {
+        reset_requests.insert(i);
+        ASSERT_TRUE(upstream_requests[i]->waitForReset(1ms));
+      }
     }
   }
   // Close the connection.
@@ -334,7 +341,8 @@ TEST_P(Http2UpstreamIntegrationTest, UpstreamConnectionCloseWithManyStreams) {
   ASSERT_TRUE(fake_upstream_connection_->waitForDisconnect());
   // Ensure the streams are all reset successfully.
   for (uint32_t i = 0; i < num_requests; ++i) {
-    if (i % 15 != 0) {
+    if (i % 15 != 0 && reset_requests.find(i) == reset_requests.end()) {
+      std::cout << "waiting for reset for " << i << std::endl;
       responses[i]->waitForReset();
     }
   }

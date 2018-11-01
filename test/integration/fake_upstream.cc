@@ -45,6 +45,10 @@ FakeStream::FakeStream(FakeHttpConnection& parent, Http::StreamEncoder& encoder,
 void FakeStream::decodeHeaders(Http::HeaderMapPtr&& headers, bool end_stream) {
   Thread::LockGuard lock(lock_);
   headers_ = std::move(headers);
+  static int c = 0;
+  if (end_stream) {
+    std::cout << "dh: " << c++ << std::endl;
+  }
   setEndStream(end_stream);
   decoder_event_.notifyOne();
 }
@@ -52,11 +56,18 @@ void FakeStream::decodeHeaders(Http::HeaderMapPtr&& headers, bool end_stream) {
 void FakeStream::decodeData(Buffer::Instance& data, bool end_stream) {
   Thread::LockGuard lock(lock_);
   body_.add(data);
+  static int c = 0;
+  if (end_stream) {
+    std::cout << reinterpret_cast<uintptr_t>(this) << " sees dd: " << c++ << std::endl;
+    
+  }
   setEndStream(end_stream);
   decoder_event_.notifyOne();
 }
 
 void FakeStream::decodeTrailers(Http::HeaderMapPtr&& trailers) {
+  static int c = 0;
+  std::cout << "dt: " << c++ << std::endl;
   Thread::LockGuard lock(lock_);
   setEndStream(true);
   trailers_ = std::move(trailers);
@@ -116,6 +127,7 @@ void FakeStream::encodeResetStream() {
 
 void FakeStream::onResetStream(Http::StreamResetReason) {
   Thread::LockGuard lock(lock_);
+  std::cout << "reset!" << std::endl;
   saw_reset_ = true;
   decoder_event_.notifyOne();
 }
