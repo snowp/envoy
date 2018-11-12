@@ -242,7 +242,7 @@ TEST(StrictDnsClusterImplTest, Basic) {
        "hpack_table_size": 0
      },
     "hosts": [{"url": "tcp://localhost1:11001"},
-              {"url": "tcp://localhost2:11002"}]
+              {"url": "tcp://localhost2:11001"}]
   }
   )EOF";
 
@@ -327,7 +327,7 @@ TEST(StrictDnsClusterImplTest, Basic) {
   EXPECT_CALL(membership_updated, ready());
   resolver2.dns_callback_(TestUtility::makeDnsResponse({"10.0.0.1", "10.0.0.1"}));
   EXPECT_THAT(
-      std::list<std::string>({"127.0.0.3:11001", "10.0.0.1:11002"}),
+      std::list<std::string>({"127.0.0.3:11001", "10.0.0.1:11001"}),
       ContainerEq(hostListToAddresses(cluster.prioritySet().hostSetsPerPriority()[0]->hosts())));
 
   EXPECT_EQ(2UL, cluster.prioritySet().hostSetsPerPriority()[0]->healthyHosts().size());
@@ -339,6 +339,16 @@ TEST(StrictDnsClusterImplTest, Basic) {
     EXPECT_EQ(cluster.info().get(), &host->cluster());
   }
 
+
+  // Ensure that we handle the case when both resolvers resolve to the same ip.
+  EXPECT_CALL(*resolver1.timer_, enableTimer(std::chrono::milliseconds(4000)));
+  EXPECT_CALL(membership_updated, ready());
+  resolver1.dns_callback_(TestUtility::makeDnsResponse({"10.0.0.1"}));
+
+  // We should now have two different host objects.
+  const auto& healthy_hosts = cluster.prioritySet().hostSetsPerPriority()[0]->healthyHosts();
+  EXPECT_EQ(2L, healthy_hosts.size());
+  EXPECT_NE(healthy_hosts[0], healthy_hosts[1]);
   // Make sure we cancel.
   resolver1.expectResolve(*dns_resolver);
   resolver1.timer_->callback_();
