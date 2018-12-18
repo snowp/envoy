@@ -67,6 +67,7 @@ public:
 
     host_set.hosts_.clear();
     host_set.healthy_hosts_.clear();
+    host_set.degraded_hosts_.clear();
     for (uint32_t i = 0; i < num_hosts; ++i) {
       host_set.hosts_.push_back(makeTestHost(info_, "tcp://127.0.0.1:80"));
     }
@@ -113,7 +114,7 @@ TEST_P(LoadBalancerBaseTest, PrioritySelection) {
   // unhealthy primary host.
   EXPECT_EQ(100, lb_.percentageLoad(0));
   EXPECT_EQ(0, lb_.percentageLoad(1));
-  EXPECT_EQ(&host_set_, &lb_.chooseHostSet(&context));
+  EXPECT_EQ(&host_set_, &lb_.chooseHostSet(&context).first);
 
   // Update the priority set with a new priority level P=2 and ensure the host
   // is chosen
@@ -123,7 +124,7 @@ TEST_P(LoadBalancerBaseTest, PrioritySelection) {
   EXPECT_EQ(0, lb_.percentageLoad(1));
   EXPECT_EQ(100, lb_.percentageLoad(2));
   priority_load = {0, 0, 100};
-  EXPECT_EQ(&tertiary_host_set_, &lb_.chooseHostSet(&context));
+  EXPECT_EQ(&tertiary_host_set_, &lb_.chooseHostSet(&context).first);
 
   // Now add a healthy host in P=0 and make sure it is immediately selected.
   updateHostSet(host_set_, 1 /* num_hosts */, 1 /* num_healthy_hosts */);
@@ -132,14 +133,14 @@ TEST_P(LoadBalancerBaseTest, PrioritySelection) {
   EXPECT_EQ(100, lb_.percentageLoad(0));
   EXPECT_EQ(0, lb_.percentageLoad(2));
   priority_load = {100, 0, 0};
-  EXPECT_EQ(&host_set_, &lb_.chooseHostSet(&context));
+  EXPECT_EQ(&host_set_, &lb_.chooseHostSet(&context).first);
 
   // Remove the healthy host and ensure we fail back over to tertiary_host_set_
   updateHostSet(host_set_, 1 /* num_hosts */, 0 /* num_healthy_hosts */);
   EXPECT_EQ(0, lb_.percentageLoad(0));
   EXPECT_EQ(100, lb_.percentageLoad(2));
   priority_load = {0, 0, 100};
-  EXPECT_EQ(&tertiary_host_set_, &lb_.chooseHostSet(&context));
+  EXPECT_EQ(&tertiary_host_set_, &lb_.chooseHostSet(&context).first);
 }
 
 // Test of host set selection with priority filter
@@ -154,7 +155,7 @@ TEST_P(LoadBalancerBaseTest, PrioritySelectionWithFilter) {
   updateHostSet(failover_host_set_, 1, 1);
 
   // Since we've excluded P0, we should pick the failover host set
-  EXPECT_EQ(failover_host_set_.priority(), lb_.chooseHostSet(&context).priority());
+  EXPECT_EQ(failover_host_set_.priority(), lb_.chooseHostSet(&context).first.priority());
 }
 
 TEST_P(LoadBalancerBaseTest, OverProvisioningFactor) {
@@ -326,6 +327,26 @@ typedef RoundRobinLoadBalancerTest FailoverTest;
 // Ensure if all the hosts with priority 0 unhealthy, the next priority hosts are used.
 TEST_P(FailoverTest, BasicFailover) {
   host_set_.hosts_ = {makeTestHost(info_, "tcp://127.0.0.1:80")};
+  failover_host_set_.healthy_hosts_ = {makeTestHost(info_, "tcp://127.0.0.1:82")};
+  failover_host_set_.hosts_ = failover_host_set_.healthy_hosts_;
+  init(false);
+  EXPECT_EQ(failover_host_set_.healthy_hosts_[0], lb_->chooseHost(nullptr));
+}
+
+// Ensure if all the hosts with priority 0 degraded, the first priority degraded hosts are used.
+TEST_P(FailoverTest, BasicDegradedHosts) {
+  host_set_.hosts_ = {makeTestHost(info_, "tcp://127.0.0.1:80")};
+  host_set_.degraded_hosts_ = host_set_.hosts_;
+  failover_host_set_.hosts_ = failover_host_set_.healthy_hosts_;
+  init(false);
+  EXPECT_EQ(host_set_.degraded_hosts_[0], lb_->chooseHost(nullptr));
+}
+
+// Ensure if all the hosts with priority 0 degraded, but healthy hosts in the failover, the healthy
+// hosts in the second priority are used.
+TEST_P(FailoverTest, BasicFailoverDegradedHosts) {
+  host_set_.hosts_ = {makeTestHost(info_, "tcp://127.0.0.1:80")};
+  host_set_.degraded_hosts_ = host_set_.hosts_;
   failover_host_set_.healthy_hosts_ = {makeTestHost(info_, "tcp://127.0.0.1:82")};
   failover_host_set_.hosts_ = failover_host_set_.healthy_hosts_;
   init(false);
