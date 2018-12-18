@@ -613,6 +613,9 @@ void EdfLoadBalancerBase::refresh(uint32_t priority) {
     add_hosts_source(
         HostsSource(priority, HostsSource::SourceType::LocalityHealthyHosts, locality_index),
         host_set->healthyHostsPerLocality().get()[locality_index]);
+  }
+  for (uint32_t locality_index = 0;
+       locality_index < host_set->degradedHostsPerLocality().get().size(); ++locality_index) {
     add_hosts_source(
         HostsSource(priority, HostsSource::SourceType::LocalityDegradedHosts, locality_index),
         host_set->degradedHostsPerLocality().get()[locality_index]);
