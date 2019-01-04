@@ -37,6 +37,7 @@ std::pair<int32_t, size_t> distributeLoad(PriorityLoad& per_priority_load,
                                           size_t total_load, size_t normalized_total_availability) {
   int32_t first_available_priority = -1;
   for (size_t i = 0; i < per_priority_availability.size(); ++i) {
+    std::cerr << "tl: " << total_load << std::endl;
     if (first_available_priority < 0 && per_priority_availability[i] > 0) {
       first_available_priority = i;
     }
@@ -177,6 +178,7 @@ void LoadBalancerBase::recalculatePerPriorityState(uint32_t priority,
   // Using the remaining load after allocating load to healthy priorities, distribute it based on
   // degraded availability.
   const auto remaining_load_for_degraded = first_healthy_and_remaining.second;
+  std::cerr << "normalized: " << normalized_total_health  << std::endl;
   std::cerr << "remaining: " << remaining_load_for_degraded << std::endl;
   const auto first_degraded_and_remaining =
       distributeLoad(degraded_per_priority_load, per_priority_degraded, remaining_load_for_degraded,
@@ -201,8 +203,22 @@ void LoadBalancerBase::recalculatePerPriorityState(uint32_t priority,
   }
 
   // The allocated load between healthy and degraded should be exactly 100.
-  /* ASSERT(100 == std::accumulate(per_priority_load.begin(), per_priority_load.end(), 0) +
-   * std::accumulate(per_priority_degraded.begin(), per_priority_degraded.end(), 0) ); */
+  const auto sum = std::accumulate(per_priority_load.begin(), per_priority_load.end(), 0) +
+      std::accumulate(per_priority_degraded.begin(), per_priority_degraded.end(), 0);
+
+  if (sum != 100) {
+    std::cerr << "!!!" << std::endl;
+    std::cerr << "healthy" << std::endl;
+    for (const auto v : per_priority_load) {
+      std::cerr << v << std::endl;
+    }
+    std::cerr << " --- " << std::endl;
+    for (const auto v : per_priority_degraded) {
+      std::cerr << v << std::endl;
+    }
+
+    throw std::exception();
+  }
 }
 
 // Method iterates through priority levels and turns on/off panic mode.
