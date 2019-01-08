@@ -207,7 +207,7 @@ HealthCheckerImplBase::ActiveHealthCheckSession::ActiveHealthCheckSession(
   }
 
   if (host->healthFlagGet(Host::HealthFlag::DEGRADED_ACTIVE_HC)) {
-    parent.incDegraded(); 
+    parent.incDegraded();
   }
 }
 

@@ -152,10 +152,9 @@ public:
                     envoy::data::core::v2alpha::HealthCheckFailureType failure_type,
                     bool first_check) override;
   void logDegraded(envoy::data::core::v2alpha::HealthCheckerType health_checker_type,
-                    const HostDescriptionConstSharedPtr& host) override;
+                   const HostDescriptionConstSharedPtr& host) override;
   void logNoMoreDegraded(envoy::data::core::v2alpha::HealthCheckerType health_checker_type,
-                    const HostDescriptionConstSharedPtr& host) override;
-
+                         const HostDescriptionConstSharedPtr& host) override;
 
 private:
   TimeSource& time_source_;
