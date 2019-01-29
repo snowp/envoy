@@ -40,7 +40,9 @@ private:
                               const HostVector& new_hosts, LocalityWeightsMap& locality_weights_map,
                               LocalityWeightsMap& new_locality_weights_map,
                               PriorityStateManager& priority_state_manager,
-                              std::unordered_map<std::string, HostSharedPtr>& updated_hosts);
+                              std::unordered_map<std::string, HostSharedPtr>& updated_hosts,
+                              std::unordered_set<HostSharedPtr>& all_hosts_added,
+                              std::unordered_set<HostSharedPtr>& all_hosts_removed);
 
   // ClusterImplBase
   void startPreInit() override;

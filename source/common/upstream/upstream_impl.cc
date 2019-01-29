@@ -388,7 +388,9 @@ HostSet& PrioritySetImpl::getOrCreateHostSet(uint32_t priority,
       HostSetImplPtr host_set = createHostSet(i, overprovisioning_factor);
       host_set->addPriorityUpdateCb([this](uint32_t priority, const HostVector& hosts_added,
                                            const HostVector& hosts_removed) {
-        runUpdateCallbacks(hosts_added, hosts_removed);
+        if (manage_membership_updates_) {
+          runUpdateCallbacks(hosts_added, hosts_removed);
+        }
         runReferenceUpdateCallbacks(priority, hosts_added, hosts_removed);
       });
       host_sets_.push_back(std::move(host_set));
@@ -614,8 +616,8 @@ ClusterSharedPtr ClusterImplBase::create(
 ClusterImplBase::ClusterImplBase(
     const envoy::api::v2::Cluster& cluster, Runtime::Loader& runtime,
     Server::Configuration::TransportSocketFactoryContext& factory_context,
-    Stats::ScopePtr&& stats_scope, bool added_via_api)
-    : runtime_(runtime) {
+    Stats::ScopePtr&& stats_scope, bool added_via_api, bool manage_membership_updates)
+    : runtime_(runtime), priority_set_(manage_membership_updates) {
   factory_context.setInitManager(init_manager_);
   auto socket_factory = createTransportSocketFactory(cluster, factory_context);
   info_ = std::make_unique<ClusterInfoImpl>(cluster, factory_context.clusterManager().bindConfig(),
@@ -967,7 +969,8 @@ StaticClusterImpl::StaticClusterImpl(
     const envoy::api::v2::Cluster& cluster, Runtime::Loader& runtime,
     Server::Configuration::TransportSocketFactoryContext& factory_context,
     Stats::ScopePtr&& stats_scope, bool added_via_api)
-    : ClusterImplBase(cluster, runtime, factory_context, std::move(stats_scope), added_via_api),
+    : ClusterImplBase(cluster, runtime, factory_context, std::move(stats_scope), added_via_api,
+                      true),
       priority_state_manager_(new PriorityStateManager(*this, factory_context.localInfo())) {
   // TODO(dio): Use by-reference when cluster.hosts() is removed.
   const envoy::api::v2::ClusterLoadAssignment cluster_load_assignment(
@@ -1105,9 +1108,12 @@ bool BaseDynamicClusterImpl::updateDynamicHostList(const HostVector& new_hosts,
         hosts_changed = true;
       }
 
-      // Did the priority change?
+      // Did the priority change? If so, we added a new host to this priority.
+      // TODO(snowp): Once we can repeat hosts between priroities, this will need to change as each
+      // host will no longer be associated with a single priority.
       if (host->priority() != existing_host->second->priority()) {
         existing_host->second->priority(host->priority());
+        hosts_added_to_current_priority.push_back(existing_host->second);
       }
 
       existing_host->second->weight(host->weight());
@@ -1203,7 +1209,7 @@ StrictDnsClusterImpl::StrictDnsClusterImpl(
     Server::Configuration::TransportSocketFactoryContext& factory_context,
     Stats::ScopePtr&& stats_scope, bool added_via_api)
     : BaseDynamicClusterImpl(cluster, runtime, factory_context, std::move(stats_scope),
-                             added_via_api),
+                             added_via_api, true),
       local_info_(factory_context.localInfo()), dns_resolver_(dns_resolver),
       dns_refresh_rate_ms_(
           std::chrono::milliseconds(PROTOBUF_GET_MS_OR_DEFAULT(cluster, dns_refresh_rate, 5000))) {

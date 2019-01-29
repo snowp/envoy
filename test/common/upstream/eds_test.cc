@@ -514,6 +514,14 @@ TEST_F(EdsTest, EndpointMovedToNewPriority) {
   EXPECT_CALL(*health_checker, addHostCheckCompleteCb(_)).Times(2);
   cluster_->setHealthChecker(health_checker);
 
+  // Add callbacks so we can verify that callbacks are invoked correctly.
+  uint32_t member_cb_invoked = 0;
+  uint32_t priority_cb_invoked = 0;
+  cluster_->prioritySet().addMemberUpdateCb(
+      [&member_cb_invoked](const auto&, const auto&) { member_cb_invoked++; });
+  cluster_->prioritySet().addPriorityUpdateCb(
+      [&priority_cb_invoked](auto, const auto&, const auto&) { priority_cb_invoked++; });
+
   Protobuf::RepeatedPtrField<envoy::api::v2::ClusterLoadAssignment> resources;
   auto* cluster_load_assignment = resources.Add();
   cluster_load_assignment->set_cluster_name("fare");
@@ -535,6 +543,9 @@ TEST_F(EdsTest, EndpointMovedToNewPriority) {
 
   VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources, ""));
 
+  EXPECT_EQ(1, member_cb_invoked);
+  EXPECT_EQ(1, priority_cb_invoked);
+
   {
     auto& hosts = cluster_->prioritySet().hostSetsPerPriority()[0]->hosts();
     EXPECT_EQ(hosts.size(), 2);
@@ -552,6 +563,10 @@ TEST_F(EdsTest, EndpointMovedToNewPriority) {
   add_endpoint(80, 1);
 
   VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources, ""));
+
+  // A priority cb for each priority, but since it's a move, no member cbs.
+  EXPECT_EQ(1, member_cb_invoked);
+  EXPECT_EQ(3, priority_cb_invoked);
 
   {
     auto& hosts = cluster_->prioritySet().hostSetsPerPriority()[0]->hosts();
@@ -601,6 +616,13 @@ TEST_F(EdsTest, EndpointMoved) {
   EXPECT_CALL(*health_checker, start());
   EXPECT_CALL(*health_checker, addHostCheckCompleteCb(_)).Times(2);
   cluster_->setHealthChecker(health_checker);
+  // Add callbacks so we can verify that callbacks are invoked correctly.
+  uint32_t member_cb_invoked = 0;
+  uint32_t priority_cb_invoked = 0;
+  cluster_->prioritySet().addMemberUpdateCb(
+      [&member_cb_invoked](const auto&, const auto&) { member_cb_invoked++; });
+  cluster_->prioritySet().addPriorityUpdateCb(
+      [&priority_cb_invoked](auto, const auto&, const auto&) { priority_cb_invoked++; });
 
   Protobuf::RepeatedPtrField<envoy::api::v2::ClusterLoadAssignment> resources;
   auto* cluster_load_assignment = resources.Add();
@@ -622,6 +644,10 @@ TEST_F(EdsTest, EndpointMoved) {
   add_endpoint(81, 1);
 
   VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources, ""));
+
+  // A priority cb for each priority, one member since we added hosts.
+  EXPECT_EQ(1, member_cb_invoked);
+  EXPECT_EQ(2, priority_cb_invoked);
 
   {
     auto& hosts = cluster_->prioritySet().hostSetsPerPriority()[0]->hosts();
@@ -649,6 +675,10 @@ TEST_F(EdsTest, EndpointMoved) {
   add_endpoint(80, 1);
 
   VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources, ""));
+
+  // A priority cb for each priority, no member callback since we didn't change hosts overall.
+  EXPECT_EQ(1, member_cb_invoked);
+  EXPECT_EQ(4, priority_cb_invoked);
 
   {
     auto& hosts = cluster_->prioritySet().hostSetsPerPriority()[0]->hosts();
