@@ -56,7 +56,7 @@ void GrpcMuxImpl::sendDiscoveryRequest(const std::string& type_url) {
     }
   }
 
-  ENVOY_LOG(trace, "Sending DiscoveryRequest for {}: {}", type_url, request.DebugString());
+  ENVOY_LOG(debug, "Sending DiscoveryRequest for {}: {}", type_url, request.DebugString());
   sendMessage(request);
 
   // clear error_detail after the request is sent if it exists.
