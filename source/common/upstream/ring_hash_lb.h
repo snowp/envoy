@@ -38,8 +38,7 @@ struct RingHashLoadBalancerStats {
  * 2) Per-zone rings and optional zone aware routing (not all applications will want this).
  * 3) Max request fallback to support hot shards (not all applications will want this).
  */
-class RingHashLoadBalancer : public ThreadAwareLoadBalancerBase,
-                             Logger::Loggable<Logger::Id::upstream> {
+class RingHashLoadBalancer : public ThreadAwareLoadBalancerBase {
 public:
   RingHashLoadBalancer(const PrioritySet& priority_set, ClusterStats& stats, Stats::Scope& scope,
                        Runtime::Loader& runtime, Runtime::RandomGenerator& random,

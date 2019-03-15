@@ -266,14 +266,16 @@ private:
 /**
  * A class for management of the set of hosts for a given priority level.
  */
-class HostSetImpl : public HostSet {
+class HostSetImpl : protected Logger::Loggable<Logger::Id::lb>, public HostSet {
 public:
   HostSetImpl(uint32_t priority, absl::optional<uint32_t> overprovisioning_factor)
       : priority_(priority), overprovisioning_factor_(overprovisioning_factor.has_value()
                                                           ? overprovisioning_factor.value()
                                                           : kDefaultOverProvisioningFactor),
         hosts_(new HostVector()), healthy_hosts_(new HostVector()),
-        degraded_hosts_(new HostVector()) {}
+        degraded_hosts_(new HostVector()) {
+          ENVOY_LOG(trace, "created with {} healthy {} degraded {} total", healthy_hosts_->size(), degraded_hosts_->size(), hosts_->size());
+        }
 
   /**
    * Install a callback that will be invoked when the host set membership changes.

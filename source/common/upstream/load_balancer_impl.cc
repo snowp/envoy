@@ -10,6 +10,7 @@
 
 #include "common/common/assert.h"
 #include "common/common/stack_array.h"
+#include "common/common/enum_to_int.h"
 #include "common/protobuf/utility.h"
 
 namespace Envoy {
@@ -205,6 +206,10 @@ void LoadBalancerBase::recalculatePerPriorityState(uint32_t priority,
     }
   }
 
+  for (size_t i = 0; i < per_priority_load.healthy_priority_load_.get().size(); ++i) {
+    ENVOY_LOG(trace, "P{} load (healthy): {}", i, per_priority_load.healthy_priority_load_.get()[i]);
+    ENVOY_LOG(trace, "P{} load (degraded): {}", i, per_priority_load.degraded_priority_load_.get()[i]);
+  }
   // The allocated load between healthy and degraded should be exactly 100.
   ASSERT(100 == std::accumulate(per_priority_load.healthy_priority_load_.get().begin(),
                                 per_priority_load.healthy_priority_load_.get().end(), 0) +
@@ -244,6 +249,7 @@ LoadBalancerBase::chooseHostSet(LoadBalancerContext* context) {
     const auto priority_and_source =
         choosePriority(random_.random(), priority_loads.healthy_priority_load_,
                        priority_loads.degraded_priority_load_);
+    ENVOY_LOG(trace, "selected host set {} ({}) with context", priority_and_source.first, enumToInt(priority_and_source.second));
     return {*priority_set_.hostSetsPerPriority()[priority_and_source.first],
             priority_and_source.second};
   }
@@ -251,6 +257,7 @@ LoadBalancerBase::chooseHostSet(LoadBalancerContext* context) {
   const auto priority_and_source =
       choosePriority(random_.random(), per_priority_load_.healthy_priority_load_,
                      per_priority_load_.degraded_priority_load_);
+  ENVOY_LOG(trace, "selected host set {} ({})", priority_and_source.first, enumToInt(priority_and_source.second));
   return {*priority_set_.hostSetsPerPriority()[priority_and_source.first],
           priority_and_source.second};
 }
@@ -540,6 +547,7 @@ ZoneAwareLoadBalancerBase::hostSourceToUse(LoadBalancerContext* context) {
   // If we're doing locality weighted balancing, pick locality.
   const absl::optional<uint32_t> locality = host_set.chooseLocality();
   if (locality.has_value()) {
+    ENVOY_LOG(trace, "selected locality {}", locality.value());
     hosts_source.source_type_ = localitySourceType(host_availability);
     hosts_source.locality_index_ = locality.value();
     return hosts_source;

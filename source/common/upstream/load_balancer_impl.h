@@ -22,7 +22,7 @@ static constexpr uint32_t kDefaultOverProvisioningFactor = 140;
 /**
  * Base class for all LB implementations.
  */
-class LoadBalancerBase : public LoadBalancer {
+class LoadBalancerBase : protected Logger::Loggable<Logger::Id::lb>, public LoadBalancer {
 public:
   enum class HostAvailability { Healthy, Degraded };
 

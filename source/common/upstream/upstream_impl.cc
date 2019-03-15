@@ -291,6 +291,8 @@ void HostSetImpl::updateHosts(PrioritySet::UpdateHostsParams&& update_hosts_para
   degraded_hosts_per_locality_ = std::move(update_hosts_params.degraded_hosts_per_locality);
   locality_weights_ = std::move(locality_weights);
 
+  ENVOY_LOG(trace, "updated with {} healthy {} degraded {} total", healthy_hosts_->size(), degraded_hosts_->size(), hosts_->size());
+
   rebuildLocalityScheduler(locality_scheduler_, locality_entries_, *healthy_hosts_per_locality_,
                            *healthy_hosts_, hosts_per_locality_, locality_weights_,
                            overprovisioning_factor_);
