@@ -131,6 +131,9 @@ void HealthCheckerImplBase::addHosts(const HostVector& hosts) {
 
 void HealthCheckerImplBase::onClusterMemberUpdate(const HostVector& hosts_added,
                                                   const HostVector& hosts_removed) {
+  if (hosts_removed.size() == 1) {
+    ENVOY_LOG_MISC(info, "removing single host {}", reinterpret_cast<uintptr_t>(hosts_removed[0].get()));
+  }
   addHosts(hosts_added);
   for (const HostSharedPtr& host : hosts_removed) {
     auto session_iter = active_sessions_.find(host);
