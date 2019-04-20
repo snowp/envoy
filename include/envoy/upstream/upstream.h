@@ -29,6 +29,7 @@
 namespace Envoy {
 namespace Upstream {
 
+class Endpoint;
 /**
  * An upstream host.
  */
@@ -43,14 +44,10 @@ public:
   // clang-format off
 #define HEALTH_FLAG_ENUM_VALUES(m)                                               \
   /* The host is currently failing active health checks. */                      \
-  m(FAILED_ACTIVE_HC, 0x1)                                                       \
-  /* The host is currently considered an outlier and has been ejected. */        \
   m(FAILED_OUTLIER_CHECK, 0x02)                                                  \
   /* The host is currently marked as unhealthy by EDS. */                        \
   m(FAILED_EDS_HEALTH, 0x04)                                                     \
   /* The host is currently marked as degraded through active health checking. */ \
-  m(DEGRADED_ACTIVE_HC, 0x08)                                                    \
-  /* The host is currently marked as degraded by EDS. */                         \
   m(DEGRADED_EDS_HEALTH, 0x10)
   // clang-format on
 
@@ -96,6 +93,11 @@ public:
    */
   virtual CreateConnectionData
   createHealthCheckConnection(Event::Dispatcher& dispatcher) const PURE;
+
+  /**
+   * @return the endpoint backing this host.
+   */
+  virtual std::shared_ptr<Endpoint> endpoint() const PURE;
 
   /**
    * @return host specific gauges.
@@ -187,6 +189,19 @@ public:
    * @param new_used supplies the new value of host being in use to be stored.
    */
   virtual void used(bool new_used) PURE;
+};
+
+class Endpoint {
+public:
+  virtual ~Endpoint() = default;
+
+  enum class EndpointHealth { FAILED_ACTIVE_HC = 1, DEGRADED_ACTIVE_HC = 2 };
+
+  virtual bool healthFlagGet(EndpointHealth flag) const PURE;
+  virtual void healthFlagSet(EndpointHealth flag) PURE;
+  virtual void healthFlagClear(EndpointHealth flag) PURE;
+
+  virtual Host::Health health() const PURE;
 };
 
 typedef std::shared_ptr<const Host> HostConstSharedPtr;

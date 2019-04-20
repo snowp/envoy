@@ -11,7 +11,7 @@ std::string HostUtility::healthFlagsToString(const Host& host) {
   }
 
   std::string ret;
-  if (host.healthFlagGet(Host::HealthFlag::FAILED_ACTIVE_HC)) {
+  if (host.endpoint()->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
     ret += "/failed_active_hc";
   }
 

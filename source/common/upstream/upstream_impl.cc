@@ -962,7 +962,7 @@ void PriorityStateManager::registerHostForPriority(
 void PriorityStateManager::updateClusterPrioritySet(
     const uint32_t priority, HostVectorSharedPtr&& current_hosts,
     const absl::optional<HostVector>& hosts_added, const absl::optional<HostVector>& hosts_removed,
-    const absl::optional<Upstream::Host::HealthFlag> health_checker_flag,
+    const absl::optional<Upstream::Endpoint::EndpointHealth> health_checker_flag,
     absl::optional<uint32_t> overprovisioning_factor) {
   // If local locality is not defined then skip populating per locality hosts.
   const auto& local_locality = local_info_node_.locality();
@@ -991,7 +991,7 @@ void PriorityStateManager::updateClusterPrioritySet(
     // the hosts unhealthy (host->healthFlagSet(Host::HealthFlag::FAILED_ACTIVE_HC)) and then fire
     // update callbacks to start the health checking process.
     if (health_checker_flag.has_value()) {
-      host->healthFlagSet(health_checker_flag.value());
+      host->endpoint()->healthFlagSet(health_checker_flag.value());
     }
     hosts_per_locality[host->locality()].push_back(host);
   }
@@ -1068,7 +1068,7 @@ void StaticClusterImpl::startPreInit() {
   // then fire update callbacks to start the health checking process.
   const auto& health_checker_flag =
       health_checker_ != nullptr
-          ? absl::optional<Upstream::Host::HealthFlag>(Host::HealthFlag::FAILED_ACTIVE_HC)
+          ? absl::optional<Upstream::Endpoint::EndpointHealth>(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)
           : absl::nullopt;
 
   auto& priority_state = priority_state_manager_->priorityState();
@@ -1186,7 +1186,7 @@ bool BaseDynamicClusterImpl::updateDynamicHostList(const HostVector& new_hosts,
 
       // If we are depending on a health checker, we initialize to unhealthy.
       if (health_checker_ != nullptr) {
-        host->healthFlagSet(Host::HealthFlag::FAILED_ACTIVE_HC);
+        host->endpoint()->healthFlagSet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC);
       }
 
       updated_hosts[host->address()->asString()] = host;
@@ -1223,7 +1223,7 @@ bool BaseDynamicClusterImpl::updateDynamicHostList(const HostVector& new_hosts,
       health_checker_ != nullptr && !info()->drainConnectionsOnHostRemoval();
   if (!current_priority_hosts.empty() && dont_remove_healthy_hosts) {
     for (auto i = current_priority_hosts.begin(); i != current_priority_hosts.end();) {
-      if (!(*i)->healthFlagGet(Host::HealthFlag::FAILED_ACTIVE_HC)) {
+      if (!(*i)->endpoint()->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
         if ((*i)->weight() > max_host_weight) {
           max_host_weight = (*i)->weight();
         }

@@ -157,6 +157,31 @@ protected:
   std::atomic<uint32_t> priority_;
 };
 
+class EndpointImpl : public Endpoint {
+public:
+  // Upstream::Endpoint
+  void healthFlagClear(EndpointHealth flag) override { health_flags_ &= ~enumToInt(flag); }
+  bool healthFlagGet(EndpointHealth flag) const override { return health_flags_ & enumToInt(flag); }
+  void healthFlagSet(EndpointHealth flag) override { health_flags_ |= enumToInt(flag); }
+  virtual Host::Health health() const override { 
+    // TODO(snowp): Do we need to make a copy of the flags here? Consider a case where the degraded flag
+    // is set. We check for FAILED_ACTIVE_HC, then before we check for FAILED_DEGRADED_HC the active health
+    // checker fails for this host. Now FAILED_DEGRADED_HC is false and we respond with healthy.
+    if (healthFlagGet(EndpointHealth::FAILED_ACTIVE_HC)) {
+      return Host::Health::Unhealthy;
+    }
+
+    if (healthFlagGet(EndpointHealth::DEGRADED_ACTIVE_HC)) {
+      return Host::Health::Degraded;
+    }
+
+    return Host::Health::Healthy;
+  }
+
+private:
+  std::atomic<uint64_t> health_flags_{};
+};
+
 /**
  * Implementation of Upstream::Host.
  */
@@ -172,7 +197,7 @@ public:
            uint32_t priority, const envoy::api::v2::core::HealthStatus health_status)
       : HostDescriptionImpl(cluster, hostname, address, metadata, locality, health_check_config,
                             priority),
-        used_(true) {
+        used_(true), endpoint_(std::make_shared<EndpointImpl>()) {
     setEdsHealthFlag(health_status);
     weight(initial_weight);
   }
@@ -187,6 +212,7 @@ public:
   void healthFlagClear(HealthFlag flag) override { health_flags_ &= ~enumToInt(flag); }
   bool healthFlagGet(HealthFlag flag) const override { return health_flags_ & enumToInt(flag); }
   void healthFlagSet(HealthFlag flag) override { health_flags_ |= enumToInt(flag); }
+  std::shared_ptr<Endpoint> endpoint() const override { return endpoint_; }
 
   ActiveHealthFailureType getActiveHealthFailureType() const override {
     return active_health_failure_type_;
@@ -203,20 +229,18 @@ public:
   }
   Host::Health health() const override {
     if (!health_flags_) {
-      return Host::Health::Healthy;
+      return endpoint_->health();
     }
 
-    // If any of the unhealthy flags are set, host is unhealthy.
-    if (healthFlagGet(HealthFlag::FAILED_ACTIVE_HC) ||
-        healthFlagGet(HealthFlag::FAILED_OUTLIER_CHECK) ||
+    // If any of the unhealthy EDS flags are set, host is unhealthy.
+    if (healthFlagGet(HealthFlag::FAILED_OUTLIER_CHECK) ||
         healthFlagGet(HealthFlag::FAILED_EDS_HEALTH)) {
       return Host::Health::Unhealthy;
     }
 
     // Only possible option at this point is that the host is degraded.
-    ASSERT(healthFlagGet(HealthFlag::DEGRADED_ACTIVE_HC) ||
-           healthFlagGet(HealthFlag::DEGRADED_EDS_HEALTH));
-    return Host::Health::Degraded;
+    ASSERT(healthFlagGet(HealthFlag::DEGRADED_EDS_HEALTH));
+    return endpoint_->health() == Host::Health::Unhealthy ? Host::Health::Unhealthy : Host::Health::Degraded;
   }
 
   uint32_t weight() const override { return weight_; }
@@ -238,6 +262,7 @@ private:
   ActiveHealthFailureType active_health_failure_type_{};
   std::atomic<uint32_t> weight_;
   std::atomic<bool> used_;
+  const std::shared_ptr<Endpoint> endpoint_;
 };
 
 class HostsPerLocalityImpl : public HostsPerLocality {
@@ -740,7 +765,7 @@ public:
   updateClusterPrioritySet(const uint32_t priority, HostVectorSharedPtr&& current_hosts,
                            const absl::optional<HostVector>& hosts_added,
                            const absl::optional<HostVector>& hosts_removed,
-                           const absl::optional<Upstream::Host::HealthFlag> health_checker_flag,
+                           const absl::optional<Upstream::Endpoint::EndpointHealth> health_checker_flag,
                            absl::optional<uint32_t> overprovisioning_factor = absl::nullopt);
 
   // Returns the size of the current cluster priority state.

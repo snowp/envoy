@@ -160,6 +160,7 @@ public:
   MOCK_METHOD1(weight, void(uint32_t new_weight));
   MOCK_CONST_METHOD0(used, bool());
   MOCK_METHOD1(used, void(bool new_used));
+  MOCK_CONST_METHOD0(endpoint, std::shared_ptr<Endpoint>());
   MOCK_CONST_METHOD0(locality, const envoy::api::v2::core::Locality&());
   MOCK_CONST_METHOD0(priority, uint32_t());
   MOCK_METHOD1(priority, void(uint32_t));

@@ -202,20 +202,20 @@ HealthCheckerImplBase::ActiveHealthCheckSession::ActiveHealthCheckSession(
       interval_timer_(parent.dispatcher_.createTimer([this]() -> void { onIntervalBase(); })),
       timeout_timer_(parent.dispatcher_.createTimer([this]() -> void { onTimeoutBase(); })) {
 
-  if (!host->healthFlagGet(Host::HealthFlag::FAILED_ACTIVE_HC)) {
+  if (!host->endpoint()->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
     parent.incHealthy();
   }
 
-  if (host->healthFlagGet(Host::HealthFlag::DEGRADED_ACTIVE_HC)) {
+  if (host->endpoint()->healthFlagGet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC)) {
     parent.incDegraded();
   }
 }
 
 HealthCheckerImplBase::ActiveHealthCheckSession::~ActiveHealthCheckSession() {
-  if (!host_->healthFlagGet(Host::HealthFlag::FAILED_ACTIVE_HC)) {
+  if (!host_->endpoint()->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
     parent_.decHealthy();
   }
-  if (host_->healthFlagGet(Host::HealthFlag::DEGRADED_ACTIVE_HC)) {
+  if (host_->endpoint()->healthFlagGet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC)) {
     parent_.decDegraded();
   }
 }
@@ -225,12 +225,12 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degrade
   num_unhealthy_ = 0;
 
   HealthTransition changed_state = HealthTransition::Unchanged;
-  if (host_->healthFlagGet(Host::HealthFlag::FAILED_ACTIVE_HC)) {
+  if (host_->endpoint()->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
     // If this is the first time we ever got a check result on this host, we immediately move
     // it to healthy. This makes startup faster with a small reduction in overall reliability
     // depending on the HC settings.
     if (first_check_ || ++num_healthy_ == parent_.healthy_threshold_) {
-      host_->healthFlagClear(Host::HealthFlag::FAILED_ACTIVE_HC);
+      host_->endpoint()->healthFlagClear(Endpoint::EndpointHealth::FAILED_ACTIVE_HC);
       parent_.incHealthy();
       changed_state = HealthTransition::Changed;
       if (parent_.event_logger_) {
@@ -241,9 +241,9 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degrade
     }
   }
 
-  if (degraded != host_->healthFlagGet(Host::HealthFlag::DEGRADED_ACTIVE_HC)) {
+  if (degraded != host_->endpoint()->healthFlagGet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC)) {
     if (degraded) {
-      host_->healthFlagSet(Host::HealthFlag::DEGRADED_ACTIVE_HC);
+      host_->endpoint()->healthFlagSet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC);
       parent_.incDegraded();
       if (parent_.event_logger_) {
         parent_.event_logger_->logDegraded(parent_.healthCheckerType(), host_);
@@ -252,7 +252,7 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degrade
       if (parent_.event_logger_) {
         parent_.event_logger_->logNoLongerDegraded(parent_.healthCheckerType(), host_);
       }
-      host_->healthFlagClear(Host::HealthFlag::DEGRADED_ACTIVE_HC);
+      host_->endpoint()->healthFlagClear(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC);
     }
 
     // This check ensures that we honor the decision made about Changed vs ChangePending in the
@@ -276,11 +276,13 @@ HealthTransition HealthCheckerImplBase::ActiveHealthCheckSession::setUnhealthy(
   // If we are unhealthy, reset the # of healthy to zero.
   num_healthy_ = 0;
 
+  // TODO(snowp): Move health checks to be per endpoint, not per host.
+  auto endpoint = host_->endpoint();
   HealthTransition changed_state = HealthTransition::Unchanged;
-  if (!host_->healthFlagGet(Host::HealthFlag::FAILED_ACTIVE_HC)) {
+  if (!endpoint->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
     if (type != envoy::data::core::v2alpha::HealthCheckFailureType::NETWORK ||
         ++num_unhealthy_ == parent_.unhealthy_threshold_) {
-      host_->healthFlagSet(Host::HealthFlag::FAILED_ACTIVE_HC);
+      endpoint->healthFlagSet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC);
       parent_.decHealthy();
       changed_state = HealthTransition::Changed;
       if (parent_.event_logger_) {

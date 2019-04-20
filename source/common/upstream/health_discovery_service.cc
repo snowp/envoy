@@ -253,7 +253,7 @@ void HdsCluster::startHealthchecks(AccessLog::AccessLogManager& access_log_manag
 void HdsCluster::initialize(std::function<void()> callback) {
   initialization_complete_callback_ = callback;
   for (const auto& host : *initial_hosts_) {
-    host->healthFlagSet(Host::HealthFlag::FAILED_ACTIVE_HC);
+    host->endpoint()->healthFlagSet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC);
   }
 
   priority_set_.updateHosts(
