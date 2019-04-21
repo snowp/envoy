@@ -239,10 +239,9 @@ void HostImpl::setEdsHealthFlag(envoy::api::v2::core::HealthStatus health_status
   }
 }
 
-Host::CreateConnectionData
-HostImpl::createHealthCheckConnection(Event::Dispatcher& dispatcher) const {
-  return {createConnection(dispatcher, *cluster_, healthCheckAddress(), nullptr, nullptr),
-          shared_from_this()};
+Network::ClientConnectionPtr
+EndpointImpl::createHealthCheckConnection(Event::Dispatcher& dispatcher) const {
+  return HostImpl::createConnection(dispatcher, *cluster_, healthCheckAddress(), nullptr, nullptr);
 }
 
 Network::ClientConnectionPtr

@@ -65,7 +65,7 @@ private:
   struct HttpActiveHealthCheckSession : public ActiveHealthCheckSession,
                                         public Http::StreamDecoder,
                                         public Http::StreamCallbacks {
-    HttpActiveHealthCheckSession(HttpHealthCheckerImpl& parent, const HostSharedPtr& host);
+    HttpActiveHealthCheckSession(HttpHealthCheckerImpl& parent, const std::shared_ptr<Endpoint>& endpoint);
     ~HttpActiveHealthCheckSession();
 
     void onResponseComplete();
@@ -120,11 +120,11 @@ private:
 
   typedef std::unique_ptr<HttpActiveHealthCheckSession> HttpActiveHealthCheckSessionPtr;
 
-  virtual Http::CodecClient* createCodecClient(Upstream::Host::CreateConnectionData& data) PURE;
+  virtual Http::CodecClient* createCodecClient(Network::ClientConnectionPtr&& conn) PURE;
 
   // HealthCheckerImplBase
-  ActiveHealthCheckSessionPtr makeSession(HostSharedPtr host) override {
-    return std::make_unique<HttpActiveHealthCheckSession>(*this, host);
+  ActiveHealthCheckSessionPtr makeSession(std::shared_ptr<Endpoint> endpoint) override {
+    return std::make_unique<HttpActiveHealthCheckSession>(*this, endpoint);
   }
   envoy::data::core::v2alpha::HealthCheckerType healthCheckerType() const override {
     return envoy::data::core::v2alpha::HealthCheckerType::HTTP;
@@ -150,7 +150,7 @@ public:
   using HttpHealthCheckerImpl::HttpHealthCheckerImpl;
 
   // HttpHealthCheckerImpl
-  Http::CodecClient* createCodecClient(Upstream::Host::CreateConnectionData& data) override;
+  Http::CodecClient* createCodecClient(Network::ClientConnectionPtr&& connection) override;
 };
 
 /**
@@ -236,8 +236,8 @@ private:
   };
 
   struct TcpActiveHealthCheckSession : public ActiveHealthCheckSession {
-    TcpActiveHealthCheckSession(TcpHealthCheckerImpl& parent, const HostSharedPtr& host)
-        : ActiveHealthCheckSession(parent, host), parent_(parent) {}
+    TcpActiveHealthCheckSession(TcpHealthCheckerImpl& parent, const std::shared_ptr<Endpoint>& endpoint)
+        : ActiveHealthCheckSession(parent, endpoint), parent_(parent) {}
     ~TcpActiveHealthCheckSession();
 
     void onData(Buffer::Instance& data);
@@ -255,8 +255,8 @@ private:
   typedef std::unique_ptr<TcpActiveHealthCheckSession> TcpActiveHealthCheckSessionPtr;
 
   // HealthCheckerImplBase
-  ActiveHealthCheckSessionPtr makeSession(HostSharedPtr host) override {
-    return std::make_unique<TcpActiveHealthCheckSession>(*this, host);
+  ActiveHealthCheckSessionPtr makeSession(std::shared_ptr<Endpoint> endpoint) override {
+    return std::make_unique<TcpActiveHealthCheckSession>(*this, endpoint);
   }
   envoy::data::core::v2alpha::HealthCheckerType healthCheckerType() const override {
     return envoy::data::core::v2alpha::HealthCheckerType::TCP;
@@ -279,7 +279,7 @@ private:
   struct GrpcActiveHealthCheckSession : public ActiveHealthCheckSession,
                                         public Http::StreamDecoder,
                                         public Http::StreamCallbacks {
-    GrpcActiveHealthCheckSession(GrpcHealthCheckerImpl& parent, const HostSharedPtr& host);
+    GrpcActiveHealthCheckSession(GrpcHealthCheckerImpl& parent, const std::shared_ptr<Endpoint>& endpoint);
     ~GrpcActiveHealthCheckSession();
 
     void onRpcComplete(Grpc::Status::GrpcStatus grpc_status, const std::string& grpc_message,
@@ -344,11 +344,11 @@ private:
     bool expect_reset_ = false;
   };
 
-  virtual Http::CodecClientPtr createCodecClient(Upstream::Host::CreateConnectionData& data) PURE;
+  virtual Http::CodecClientPtr createCodecClient(Network::ClientConnectionPtr&& connection) PURE;
 
   // HealthCheckerImplBase
-  ActiveHealthCheckSessionPtr makeSession(HostSharedPtr host) override {
-    return std::make_unique<GrpcActiveHealthCheckSession>(*this, host);
+  ActiveHealthCheckSessionPtr makeSession(std::shared_ptr<Endpoint> endpoint) override {
+    return std::make_unique<GrpcActiveHealthCheckSession>(*this, endpoint);
   }
   envoy::data::core::v2alpha::HealthCheckerType healthCheckerType() const override {
     return envoy::data::core::v2alpha::HealthCheckerType::GRPC;
@@ -367,7 +367,7 @@ public:
   using GrpcHealthCheckerImpl::GrpcHealthCheckerImpl;
 
   // GrpcHealthCheckerImpl
-  Http::CodecClientPtr createCodecClient(Upstream::Host::CreateConnectionData& data) override;
+  Http::CodecClientPtr createCodecClient(Network::ClientConnectionPtr&& connection) override;
 };
 
 } // namespace Upstream

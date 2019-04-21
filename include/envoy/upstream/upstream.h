@@ -85,14 +85,7 @@ public:
   createConnection(Event::Dispatcher& dispatcher,
                    const Network::ConnectionSocket::OptionsSharedPtr& options,
                    Network::TransportSocketOptionsSharedPtr transport_socket_options) const PURE;
-
-  /**
-   * Create a health check connection for this host.
-   * @param dispatcher supplies the owning dispatcher.
-   * @return the connection data.
-   */
-  virtual CreateConnectionData
-  createHealthCheckConnection(Event::Dispatcher& dispatcher) const PURE;
+  ;
 
   /**
    * @return the endpoint backing this host.
@@ -148,12 +141,6 @@ public:
   virtual ActiveHealthFailureType getActiveHealthFailureType() const PURE;
 
   /**
-   * Set the most recent health failure type for a host. Types are specified in
-   * ActiveHealthFailureType.
-   */
-  virtual void setActiveHealthFailureType(ActiveHealthFailureType flag) PURE;
-
-  /**
    * Set the host's health checker monitor. Monitors are assumed to be thread safe, however
    * a new monitor must be installed before the host is used across threads. Thus,
    * this routine should only be called on the main thread before the host is used across threads.
@@ -202,6 +189,30 @@ public:
   virtual void healthFlagClear(EndpointHealth flag) PURE;
 
   virtual Host::Health health() const PURE;
+
+  /**
+   * @return the address used to health check the host.
+   */
+  virtual Network::Address::InstanceConstSharedPtr healthCheckAddress() const PURE;
+
+  /**
+   * Returns the host's ActiveHealthFailureType. Types are specified in ActiveHealthFailureType.
+   */
+  virtual Host::ActiveHealthFailureType getActiveHealthFailureType() const PURE;
+
+  /**
+   * Set the most recent health failure type for a host. Types are specified in
+   * ActiveHealthFailureType.
+   */
+  virtual void setActiveHealthFailureType(Host::ActiveHealthFailureType flag) PURE;
+
+  /**
+   * Create a health check connection for this host.
+   * @param dispatcher supplies the owning dispatcher.
+   * @return the connection data.
+   */
+  virtual Network::ClientConnectionPtr
+  createHealthCheckConnection(Event::Dispatcher& dispatcher) const PURE;
 };
 
 typedef std::shared_ptr<const Host> HostConstSharedPtr;

@@ -83,7 +83,7 @@ public:
           fmt::format("Invalid host configuration: non-zero port for non-IP address"));
     }
     health_check_address_ =
-        health_check_config.port_value() == 0
+          health_check_config.port_value() == 0
             ? dest_address
             : Network::Utility::getAddressWithPort(*dest_address, health_check_config.port_value());
   }
@@ -159,14 +159,16 @@ protected:
 
 class EndpointImpl : public Endpoint {
 public:
+  explicit EndpointImpl(std::shared_ptr<const ClusterInfo> cluster, Network::Address::InstanceConstSharedPtr health_check_address) : cluster_(cluster), health_check_address_(health_check_address) {}
   // Upstream::Endpoint
   void healthFlagClear(EndpointHealth flag) override { health_flags_ &= ~enumToInt(flag); }
   bool healthFlagGet(EndpointHealth flag) const override { return health_flags_ & enumToInt(flag); }
   void healthFlagSet(EndpointHealth flag) override { health_flags_ |= enumToInt(flag); }
-  virtual Host::Health health() const override { 
-    // TODO(snowp): Do we need to make a copy of the flags here? Consider a case where the degraded flag
-    // is set. We check for FAILED_ACTIVE_HC, then before we check for FAILED_DEGRADED_HC the active health
-    // checker fails for this host. Now FAILED_DEGRADED_HC is false and we respond with healthy.
+  Host::Health health() const override {
+    // TODO(snowp): Do we need to make a copy of the flags here? Consider a case where the degraded
+    // flag is set. We check for FAILED_ACTIVE_HC, then before we check for FAILED_DEGRADED_HC the
+    // active health checker fails for this host. Now FAILED_DEGRADED_HC is false and we respond
+    // with healthy.
     if (healthFlagGet(EndpointHealth::FAILED_ACTIVE_HC)) {
       return Host::Health::Unhealthy;
     }
@@ -178,8 +180,21 @@ public:
     return Host::Health::Healthy;
   }
 
+  Host::ActiveHealthFailureType getActiveHealthFailureType() const override {
+    return active_health_failure_type_;
+  }
+  void setActiveHealthFailureType(Host::ActiveHealthFailureType type) override {
+    active_health_failure_type_ = type;
+  }
+
+  Network::ClientConnectionPtr createHealthCheckConnection(Event::Dispatcher& dispatcher) const override;
+  Network::Address::InstanceConstSharedPtr healthCheckAddress() const override { return health_check_address_; }
+
 private:
   std::atomic<uint64_t> health_flags_{};
+  Host::ActiveHealthFailureType active_health_failure_type_{};
+  std::shared_ptr<const ClusterInfo> cluster_;
+  Network::Address::InstanceConstSharedPtr health_check_address_;
 };
 
 /**
@@ -197,7 +212,12 @@ public:
            uint32_t priority, const envoy::api::v2::core::HealthStatus health_status)
       : HostDescriptionImpl(cluster, hostname, address, metadata, locality, health_check_config,
                             priority),
-        used_(true), endpoint_(std::make_shared<EndpointImpl>()) {
+        used_(true) {
+    endpoint_ = std::make_shared<EndpointImpl>(
+        cluster, health_check_config.port_value() == 0
+                     ? address
+                     : Network::Utility::getAddressWithPort(*address,
+                                                            health_check_config.port_value()));
     setEdsHealthFlag(health_status);
     weight(initial_weight);
   }
@@ -207,7 +227,6 @@ public:
   CreateConnectionData createConnection(
       Event::Dispatcher& dispatcher, const Network::ConnectionSocket::OptionsSharedPtr& options,
       Network::TransportSocketOptionsSharedPtr transport_socket_options) const override;
-  CreateConnectionData createHealthCheckConnection(Event::Dispatcher& dispatcher) const override;
   std::vector<Stats::GaugeSharedPtr> gauges() const override { return stats_store_.gauges(); }
   void healthFlagClear(HealthFlag flag) override { health_flags_ &= ~enumToInt(flag); }
   bool healthFlagGet(HealthFlag flag) const override { return health_flags_ & enumToInt(flag); }
@@ -215,10 +234,7 @@ public:
   std::shared_ptr<Endpoint> endpoint() const override { return endpoint_; }
 
   ActiveHealthFailureType getActiveHealthFailureType() const override {
-    return active_health_failure_type_;
-  }
-  void setActiveHealthFailureType(ActiveHealthFailureType type) override {
-    active_health_failure_type_ = type;
+    return endpoint_->getActiveHealthFailureType();
   }
 
   void setHealthChecker(HealthCheckHostMonitorPtr&& health_checker) override {
@@ -240,7 +256,8 @@ public:
 
     // Only possible option at this point is that the host is degraded.
     ASSERT(healthFlagGet(HealthFlag::DEGRADED_EDS_HEALTH));
-    return endpoint_->health() == Host::Health::Unhealthy ? Host::Health::Unhealthy : Host::Health::Degraded;
+    return endpoint_->health() == Host::Health::Unhealthy ? Host::Health::Unhealthy
+                                                          : Host::Health::Degraded;
   }
 
   uint32_t weight() const override { return weight_; }
@@ -248,7 +265,7 @@ public:
   bool used() const override { return used_; }
   void used(bool new_used) override { used_ = new_used; }
 
-protected:
+// TODO(snowp): Find a better place for this.
   static Network::ClientConnectionPtr
   createConnection(Event::Dispatcher& dispatcher, const ClusterInfo& cluster,
                    Network::Address::InstanceConstSharedPtr address,
@@ -259,10 +276,9 @@ private:
   void setEdsHealthFlag(envoy::api::v2::core::HealthStatus health_status);
 
   std::atomic<uint64_t> health_flags_{};
-  ActiveHealthFailureType active_health_failure_type_{};
   std::atomic<uint32_t> weight_;
   std::atomic<bool> used_;
-  const std::shared_ptr<Endpoint> endpoint_;
+  std::shared_ptr<Endpoint> endpoint_;
 };
 
 class HostsPerLocalityImpl : public HostsPerLocality {
@@ -721,6 +737,34 @@ protected:
 protected:
   PrioritySetImpl priority_set_;
 
+  std::shared_ptr<Endpoint> getOrCreateEndpoint(const Network::Address::Instance& address, const Host* host) {
+    auto itr = endpoints_.find(address.asString());
+    if (itr != endpoints_.end()) {
+       itr->second.hosts.insert(host);
+       return itr->second.endpoint;
+    } else {
+      const auto endpoint = std::make_shared<EndpointImpl>(info_, host->healthCheckAddress());
+      EndpointWithReferences info{endpoint};
+      info.hosts.insert(host);
+
+      endpoints_.emplace(address.asString(), std::move(info));
+      return endpoint;
+    }
+  }
+
+  void removeEndpointReference(const Network::Address::Instance& address, const Host* host) {
+    ASSERT(endpoints_.count(address.asString()) == 1);
+
+    auto itr = endpoints_.find(address.asString());
+    ASSERT(itr != endpoints_.end());
+    itr->second.hosts.erase(host);
+
+    if (itr->second.hosts.empty()) {
+      endpoints_.erase(itr);
+      // TODO(snowp): some callback
+    }
+  }
+
 private:
   void finishInitialization();
   void reloadHealthyHosts();
@@ -728,6 +772,15 @@ private:
   bool initialization_started_{};
   std::function<void()> initialization_complete_callback_;
   uint64_t pending_initialize_health_checks_{};
+
+  struct EndpointWithReferences {
+    explicit EndpointWithReferences(std::shared_ptr<Endpoint> endpoint) : endpoint(endpoint) {}
+    std::shared_ptr<Endpoint> endpoint;
+    // Collection of all hosts that reference this endpoint.
+    std::unordered_set<const Host*> hosts;
+  };
+
+  std::unordered_map<std::string, EndpointWithReferences> endpoints_;
 };
 
 using ClusterImplBaseSharedPtr = std::shared_ptr<ClusterImplBase>;
@@ -761,12 +814,12 @@ public:
       const HostSharedPtr& host,
       const envoy::api::v2::endpoint::LocalityLbEndpoints& locality_lb_endpoint);
 
-  void
-  updateClusterPrioritySet(const uint32_t priority, HostVectorSharedPtr&& current_hosts,
-                           const absl::optional<HostVector>& hosts_added,
-                           const absl::optional<HostVector>& hosts_removed,
-                           const absl::optional<Upstream::Endpoint::EndpointHealth> health_checker_flag,
-                           absl::optional<uint32_t> overprovisioning_factor = absl::nullopt);
+  void updateClusterPrioritySet(
+      const uint32_t priority, HostVectorSharedPtr&& current_hosts,
+      const absl::optional<HostVector>& hosts_added,
+      const absl::optional<HostVector>& hosts_removed,
+      const absl::optional<Upstream::Endpoint::EndpointHealth> health_checker_flag,
+      absl::optional<uint32_t> overprovisioning_factor = absl::nullopt);
 
   // Returns the size of the current cluster priority state.
   size_t size() const { return priority_state_.size(); }

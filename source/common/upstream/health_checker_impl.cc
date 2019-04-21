@@ -144,8 +144,8 @@ bool HttpHealthCheckerImpl::HttpStatusChecker::inRange(uint64_t http_status) con
 }
 
 HttpHealthCheckerImpl::HttpActiveHealthCheckSession::HttpActiveHealthCheckSession(
-    HttpHealthCheckerImpl& parent, const HostSharedPtr& host)
-    : ActiveHealthCheckSession(parent, host), parent_(parent),
+    HttpHealthCheckerImpl& parent, const std::shared_ptr<Endpoint>& endpoint)
+    : ActiveHealthCheckSession(parent, endpoint), parent_(parent),
       hostname_(parent_.host_value_.empty() ? parent_.cluster_.info()->name()
                                             : parent_.host_value_),
       protocol_(parent_.codec_client_type_ == Http::CodecClient::Type::HTTP1
@@ -183,9 +183,9 @@ void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onEvent(Network::Conne
 // TODO(lilika) : Support connection pooling
 void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onInterval() {
   if (!client_) {
-    Upstream::Host::CreateConnectionData conn =
-        host_->createHealthCheckConnection(parent_.dispatcher_);
-    client_.reset(parent_.createCodecClient(conn));
+    auto conn =
+        endpoint_->createHealthCheckConnection(parent_.dispatcher_);
+    client_.reset(parent_.createCodecClient(std::move(conn)));
     client_->addConnectionCallbacks(connection_callback_impl_);
     expect_reset_ = false;
   }
@@ -202,7 +202,6 @@ void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onInterval() {
   StreamInfo::StreamInfoImpl stream_info(protocol_, parent_.dispatcher_.timeSource());
   stream_info.setDownstreamLocalAddress(local_address_);
   stream_info.setDownstreamRemoteAddress(local_address_);
-  stream_info.onUpstreamHostSelected(host_);
   parent_.request_headers_parser_->evaluateHeaders(request_headers, stream_info);
   request_encoder_->encodeHeaders(request_headers, true);
   request_encoder_ = nullptr;
@@ -215,7 +214,7 @@ void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onResetStream(Http::St
   }
 
   ENVOY_CONN_LOG(debug, "connection/stream error health_flags={}", *client_,
-                 HostUtility::healthFlagsToString(*host_));
+                 HostUtility::healthFlagsToString(*endpoint_));
   handleFailure(envoy::data::core::v2alpha::HealthCheckFailureType::NETWORK);
 }
 
@@ -223,7 +222,7 @@ HttpHealthCheckerImpl::HttpActiveHealthCheckSession::HealthCheckResult
 HttpHealthCheckerImpl::HttpActiveHealthCheckSession::healthCheckResult() {
   uint64_t response_code = Http::Utility::getResponseStatus(*response_headers_);
   ENVOY_CONN_LOG(debug, "hc response={} health_flags={}", *client_, response_code,
-                 HostUtility::healthFlagsToString(*host_));
+                 HostUtility::healthFlagsToString(*endpoint_));
 
   if (!parent_.http_status_checker_.inRange(response_code)) {
     return HealthCheckResult::Failed;
@@ -259,7 +258,7 @@ void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onResponseComplete() {
     handleSuccess(true);
     break;
   case HealthCheckResult::Failed:
-    host_->setActiveHealthFailureType(Host::ActiveHealthFailureType::UNHEALTHY);
+    endpoint_->setActiveHealthFailureType(Host::ActiveHealthFailureType::UNHEALTHY);
     handleFailure(envoy::data::core::v2alpha::HealthCheckFailureType::ACTIVE);
     break;
   }
@@ -276,9 +275,9 @@ void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onResponseComplete() {
 
 void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onTimeout() {
   if (client_) {
-    host_->setActiveHealthFailureType(Host::ActiveHealthFailureType::TIMEOUT);
+    endpoint_->setActiveHealthFailureType(Host::ActiveHealthFailureType::TIMEOUT);
     ENVOY_CONN_LOG(debug, "connection/stream timeout health_flags={}", *client_,
-                   HostUtility::healthFlagsToString(*host_));
+                   HostUtility::healthFlagsToString(*endpoint_));
 
     // If there is an active request it will get reset, so make sure we ignore the reset.
     expect_reset_ = true;
@@ -296,9 +295,9 @@ Http::CodecClient::Type HttpHealthCheckerImpl::codecClientType(bool use_http2) {
 }
 
 Http::CodecClient*
-ProdHttpHealthCheckerImpl::createCodecClient(Upstream::Host::CreateConnectionData& data) {
-  return new Http::CodecClientProd(codec_client_type_, std::move(data.connection_),
-                                   data.host_description_, dispatcher_);
+ProdHttpHealthCheckerImpl::createCodecClient(Network::ClientConnectionPtr&& connection) {
+  return new Http::CodecClientProd(codec_client_type_, std::move(connection),
+                                   cluster_.info(), dispatcher_);
 }
 
 TcpHealthCheckMatcher::MatchSegments TcpHealthCheckMatcher::loadProtoBytes(
@@ -361,7 +360,7 @@ void TcpHealthCheckerImpl::TcpActiveHealthCheckSession::onData(Buffer::Instance&
       client_->close(Network::ConnectionCloseType::NoFlush);
     }
   } else {
-    host_->setActiveHealthFailureType(Host::ActiveHealthFailureType::UNHEALTHY);
+    endpoint_->setActiveHealthFailureType(Host::ActiveHealthFailureType::UNHEALTHY);
   }
 }
 
@@ -398,7 +397,7 @@ void TcpHealthCheckerImpl::TcpActiveHealthCheckSession::onEvent(Network::Connect
 // TODO(lilika) : Support connection pooling
 void TcpHealthCheckerImpl::TcpActiveHealthCheckSession::onInterval() {
   if (!client_) {
-    client_ = host_->createHealthCheckConnection(parent_.dispatcher_).connection_;
+    client_ = endpoint_->createHealthCheckConnection(parent_.dispatcher_);
     session_callbacks_.reset(new TcpSessionCallbacks(*this));
     client_->addConnectionCallbacks(*session_callbacks_);
     client_->addReadFilter(session_callbacks_);
@@ -418,7 +417,7 @@ void TcpHealthCheckerImpl::TcpActiveHealthCheckSession::onInterval() {
 }
 
 void TcpHealthCheckerImpl::TcpActiveHealthCheckSession::onTimeout() {
-  host_->setActiveHealthFailureType(Host::ActiveHealthFailureType::TIMEOUT);
+  endpoint_->setActiveHealthFailureType(Host::ActiveHealthFailureType::TIMEOUT);
   client_->close(Network::ConnectionCloseType::NoFlush);
 }
 
@@ -441,8 +440,8 @@ GrpcHealthCheckerImpl::GrpcHealthCheckerImpl(const Cluster& cluster,
 }
 
 GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::GrpcActiveHealthCheckSession(
-    GrpcHealthCheckerImpl& parent, const HostSharedPtr& host)
-    : ActiveHealthCheckSession(parent, host), parent_(parent) {}
+    GrpcHealthCheckerImpl& parent, const std::shared_ptr<Endpoint>& endpoint)
+    : ActiveHealthCheckSession(parent, endpoint), parent_(parent) {}
 
 GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::~GrpcActiveHealthCheckSession() {
   if (client_) {
@@ -541,9 +540,9 @@ void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onEvent(Network::Conne
 
 void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onInterval() {
   if (!client_) {
-    Upstream::Host::CreateConnectionData conn =
-        host_->createHealthCheckConnection(parent_.dispatcher_);
-    client_ = parent_.createCodecClient(conn);
+    Network::ClientConnectionPtr connection =
+        endpoint_->createHealthCheckConnection(parent_.dispatcher_);
+    client_ = parent_.createCodecClient(std::move(connection));
     client_->addConnectionCallbacks(connection_callback_impl_);
     client_->setCodecConnectionCallbacks(http_connection_callback_impl_);
   }
@@ -583,7 +582,7 @@ void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onResetStream(Http::St
   }
 
   ENVOY_CONN_LOG(debug, "connection/stream error health_flags={}", *client_,
-                 HostUtility::healthFlagsToString(*host_));
+                 HostUtility::healthFlagsToString(*endpoint_));
 
   // TODO(baranov1ch): according to all HTTP standards, we should check if reason is one of
   // Http::StreamResetReason::RemoteRefusedStreamReset (which may mean GOAWAY),
@@ -595,7 +594,7 @@ void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onResetStream(Http::St
 
 void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onGoAway() {
   ENVOY_CONN_LOG(debug, "connection going away health_flags={}", *client_,
-                 HostUtility::healthFlagsToString(*host_));
+                 HostUtility::healthFlagsToString(*endpoint_));
   // Even if we have active health check probe, fail it on GOAWAY and schedule new one.
   if (request_encoder_) {
     handleFailure(envoy::data::core::v2alpha::HealthCheckFailureType::NETWORK);
@@ -652,7 +651,7 @@ void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::resetState() {
 
 void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onTimeout() {
   ENVOY_CONN_LOG(debug, "connection/stream timeout health_flags={}", *client_,
-                 HostUtility::healthFlagsToString(*host_));
+                 HostUtility::healthFlagsToString(*endpoint_));
   expect_reset_ = true;
   request_encoder_->getStream().resetStream(Http::StreamResetReason::LocalReset);
 }
@@ -687,14 +686,14 @@ void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::logHealthCheckStatus(
   }
 
   ENVOY_CONN_LOG(debug, "hc grpc_status={} service_status={} health_flags={}", *client_,
-                 grpc_status_message, service_status, HostUtility::healthFlagsToString(*host_));
+                 grpc_status_message, service_status, HostUtility::healthFlagsToString(*endpoint_));
 }
 
 Http::CodecClientPtr
-ProdGrpcHealthCheckerImpl::createCodecClient(Upstream::Host::CreateConnectionData& data) {
+ProdGrpcHealthCheckerImpl::createCodecClient(Network::ClientConnectionPtr&& connection) {
   return std::make_unique<Http::CodecClientProd>(Http::CodecClient::Type::HTTP2,
-                                                 std::move(data.connection_),
-                                                 data.host_description_, dispatcher_);
+                                                 std::move(connection),
+                                                 cluster_.info(), dispatcher_);
 }
 
 std::ostream& operator<<(std::ostream& out, HealthState state) {

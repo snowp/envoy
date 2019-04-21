@@ -13,10 +13,10 @@ namespace Envoy {
 namespace Http {
 
 CodecClient::CodecClient(Type type, Network::ClientConnectionPtr&& connection,
-                         Upstream::HostDescriptionConstSharedPtr host,
+                         Upstream::ClusterInfoConstSharedPtr cluster,
                          Event::Dispatcher& dispatcher)
-    : type_(type), connection_(std::move(connection)), host_(host),
-      idle_timeout_(host_->cluster().idleTimeout()) {
+    : type_(type), connection_(std::move(connection)), cluster_(cluster),
+      idle_timeout_(cluster->idleTimeout()) {
   // Make sure upstream connections process data and then the FIN, rather than processing
   // TCP disconnects immediately. (see https://github.com/envoyproxy/envoy/issues/1679 for details)
   connection_->detectEarlyCloseWhenReadDisabled(false);
@@ -130,14 +130,14 @@ void CodecClient::onData(Buffer::Instance& data) {
   }
 
   if (protocol_error) {
-    host_->cluster().stats().upstream_cx_protocol_error_.inc();
+    cluster_->stats().upstream_cx_protocol_error_.inc();
   }
 }
 
 CodecClientProd::CodecClientProd(Type type, Network::ClientConnectionPtr&& connection,
-                                 Upstream::HostDescriptionConstSharedPtr host,
+                                 Upstream::ClusterInfoConstSharedPtr cluster,
                                  Event::Dispatcher& dispatcher)
-    : CodecClient(type, std::move(connection), host, dispatcher) {
+    : CodecClient(type, std::move(connection), cluster, dispatcher) {
   switch (type) {
   case Type::HTTP1: {
     codec_ = std::make_unique<Http1::ClientConnectionImpl>(*connection_, *this);
@@ -145,7 +145,7 @@ CodecClientProd::CodecClientProd(Type type, Network::ClientConnectionPtr&& conne
   }
   case Type::HTTP2: {
     codec_ = std::make_unique<Http2::ClientConnectionImpl>(
-        *connection_, *this, host->cluster().statsScope(), host->cluster().http2Settings(),
+        *connection_, *this, cluster->statsScope(), cluster->http2Settings(),
         Http::DEFAULT_MAX_REQUEST_HEADERS_KB);
     break;
   }

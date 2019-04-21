@@ -118,10 +118,10 @@ protected:
    * Create a codec client and connect to a remote host/port.
    * @param type supplies the codec type.
    * @param connection supplies the connection to communicate on.
-   * @param host supplies the owning host.
+   * @param cluster supplies the owning cluster.
    */
   CodecClient(Type type, Network::ClientConnectionPtr&& connection,
-              Upstream::HostDescriptionConstSharedPtr host, Event::Dispatcher& dispatcher);
+              Upstream::ClusterInfoConstSharedPtr cluster, Event::Dispatcher& dispatcher);
 
   // Http::ConnectionCallbacks
   void onGoAway() override {
@@ -131,7 +131,7 @@ protected:
   }
 
   void onIdleTimeout() {
-    host_->cluster().stats().upstream_cx_idle_timeout_.inc();
+    cluster_->stats().upstream_cx_idle_timeout_.inc();
     close();
   }
 
@@ -150,7 +150,7 @@ protected:
   const Type type_;
   ClientConnectionPtr codec_;
   Network::ClientConnectionPtr connection_;
-  Upstream::HostDescriptionConstSharedPtr host_;
+  Upstream::ClusterInfoConstSharedPtr cluster_;
   Event::TimerPtr idle_timer_;
   const absl::optional<std::chrono::milliseconds> idle_timeout_;
 
@@ -236,7 +236,7 @@ typedef std::unique_ptr<CodecClient> CodecClientPtr;
 class CodecClientProd : public CodecClient {
 public:
   CodecClientProd(Type type, Network::ClientConnectionPtr&& connection,
-                  Upstream::HostDescriptionConstSharedPtr host, Event::Dispatcher& dispatcher);
+                  Upstream::ClusterInfoConstSharedPtr cluster, Event::Dispatcher& dispatcher);
 };
 
 } // namespace Http

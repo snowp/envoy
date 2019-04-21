@@ -53,13 +53,13 @@ protected:
     void start() { onIntervalBase(); }
 
   protected:
-    ActiveHealthCheckSession(HealthCheckerImplBase& parent, HostSharedPtr host);
+    ActiveHealthCheckSession(HealthCheckerImplBase& parent, std::shared_ptr<Endpoint> endpoint);
 
     void handleSuccess(bool degraded = false);
     void handleDegraded();
     void handleFailure(envoy::data::core::v2alpha::HealthCheckFailureType type);
 
-    HostSharedPtr host_;
+    std::shared_ptr<Endpoint> endpoint_;
 
   private:
     virtual void onInterval() PURE;
@@ -81,7 +81,7 @@ protected:
                         Event::Dispatcher& dispatcher, Runtime::Loader& runtime,
                         Runtime::RandomGenerator& random, HealthCheckEventLoggerPtr&& event_logger);
 
-  virtual ActiveHealthCheckSessionPtr makeSession(HostSharedPtr host) PURE;
+  virtual ActiveHealthCheckSessionPtr makeSession(std::shared_ptr<Endpoint> endpoint) PURE;
   virtual envoy::data::core::v2alpha::HealthCheckerType healthCheckerType() const PURE;
 
   const bool always_log_health_check_failures_;
@@ -99,14 +99,14 @@ protected:
 private:
   struct HealthCheckHostMonitorImpl : public HealthCheckHostMonitor {
     HealthCheckHostMonitorImpl(const std::shared_ptr<HealthCheckerImplBase>& health_checker,
-                               const HostSharedPtr& host)
-        : health_checker_(health_checker), host_(host) {}
+                               std::shared_ptr<Endpoint> endpoint)
+        : health_checker_(health_checker), endpoint_(std::move(endpoint)) {}
 
     // Upstream::HealthCheckHostMonitor
     void setUnhealthy() override;
 
     std::weak_ptr<HealthCheckerImplBase> health_checker_;
-    std::weak_ptr<Host> host_;
+    std::weak_ptr<Endpoint> endpoint_;
   };
 
   void addHosts(const HostVector& hosts);
@@ -119,7 +119,7 @@ private:
   void onClusterMemberUpdate(const HostVector& hosts_added, const HostVector& hosts_removed);
   void refreshHealthyStat();
   void runCallbacks(HostSharedPtr host, HealthTransition changed_state);
-  void setUnhealthyCrossThread(const HostSharedPtr& host);
+  void setUnhealthyCrossThread(const std::shared_ptr<Endpoint>& endpoint);
 
   static const std::chrono::milliseconds NO_TRAFFIC_INTERVAL;
 
@@ -131,7 +131,8 @@ private:
   const std::chrono::milliseconds unhealthy_interval_;
   const std::chrono::milliseconds unhealthy_edge_interval_;
   const std::chrono::milliseconds healthy_edge_interval_;
-  std::unordered_map<HostSharedPtr, ActiveHealthCheckSessionPtr> active_sessions_;
+  std::unordered_map<std::shared_ptr<Endpoint>, ActiveHealthCheckSessionPtr> active_sessions_;
+  std::unordered_map<std::shared_ptr<Endpoint>, std::unordered_set<HostSharedPtr>> host_by_endpoint_;
   uint64_t local_process_healthy_{};
   uint64_t local_process_degraded_{};
 };

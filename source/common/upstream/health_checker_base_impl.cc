@@ -121,11 +121,13 @@ std::chrono::milliseconds HealthCheckerImplBase::interval(HealthState state,
 
 void HealthCheckerImplBase::addHosts(const HostVector& hosts) {
   for (const HostSharedPtr& host : hosts) {
-    active_sessions_[host] = makeSession(host);
-    host->setActiveHealthFailureType(Host::ActiveHealthFailureType::UNKNOWN);
+    const auto endpoint = host->endpoint();
+    host_by_endpoint_[endpoint].insert(host);
+    active_sessions_[endpoint] = makeSession(endpoint);
+    endpoint->setActiveHealthFailureType(Host::ActiveHealthFailureType::UNKNOWN);
     host->setHealthChecker(
-        HealthCheckHostMonitorPtr{new HealthCheckHostMonitorImpl(shared_from_this(), host)});
-    active_sessions_[host]->start();
+        HealthCheckHostMonitorPtr{new HealthCheckHostMonitorImpl(shared_from_this(), endpoint)});
+    active_sessions_[endpoint]->start();
   }
 }
 
@@ -133,9 +135,18 @@ void HealthCheckerImplBase::onClusterMemberUpdate(const HostVector& hosts_added,
                                                   const HostVector& hosts_removed) {
   addHosts(hosts_added);
   for (const HostSharedPtr& host : hosts_removed) {
-    auto session_iter = active_sessions_.find(host);
-    ASSERT(active_sessions_.end() != session_iter);
-    active_sessions_.erase(session_iter);
+    auto itr = host_by_endpoint_.find(host->endpoint());
+    auto hosts_itr = itr->second.find(host);
+    ASSERT(itr->second.end() != hosts_itr);
+    itr->second.erase(hosts_itr);
+
+    if (itr->second.empty()) {
+      auto session_iter = active_sessions_.find(host->endpoint());
+      ASSERT(active_sessions_.end() != session_iter);
+      active_sessions_.erase(session_iter);
+
+      host_by_endpoint_.erase(itr);
+    }
   }
 }
 
@@ -162,11 +173,11 @@ void HealthCheckerImplBase::HealthCheckHostMonitorImpl::setUnhealthy() {
   // This is called cross thread. The cluster/health checker might already be gone.
   std::shared_ptr<HealthCheckerImplBase> health_checker = health_checker_.lock();
   if (health_checker) {
-    health_checker->setUnhealthyCrossThread(host_.lock());
+    health_checker->setUnhealthyCrossThread(endpoint_.lock());
   }
 }
 
-void HealthCheckerImplBase::setUnhealthyCrossThread(const HostSharedPtr& host) {
+void HealthCheckerImplBase::setUnhealthyCrossThread(const std::shared_ptr<Endpoint>& endpoint) {
   // The threading here is complex. The cluster owns the only strong reference to the health
   // checker. It might go away when we post to the main thread from a worker thread. To deal with
   // this we use the following sequence of events:
@@ -175,13 +186,13 @@ void HealthCheckerImplBase::setUnhealthyCrossThread(const HostSharedPtr& host) {
   // 2) On the main thread, we make sure it is still valid (as the cluster may have been destroyed).
   // 3) Additionally, the host/session may also be gone by then so we check that also.
   std::weak_ptr<HealthCheckerImplBase> weak_this = shared_from_this();
-  dispatcher_.post([weak_this, host]() -> void {
+  dispatcher_.post([weak_this, endpoint]() -> void {
     std::shared_ptr<HealthCheckerImplBase> shared_this = weak_this.lock();
     if (shared_this == nullptr) {
       return;
     }
 
-    const auto session = shared_this->active_sessions_.find(host);
+    const auto session = shared_this->active_sessions_.find(endpoint);
     if (session == shared_this->active_sessions_.end()) {
       return;
     }
@@ -197,25 +208,24 @@ void HealthCheckerImplBase::start() {
 }
 
 HealthCheckerImplBase::ActiveHealthCheckSession::ActiveHealthCheckSession(
-    HealthCheckerImplBase& parent, HostSharedPtr host)
-    : host_(host), parent_(parent),
+    HealthCheckerImplBase& parent, std::shared_ptr<Endpoint> endpoint)
+    : endpoint_(std::move(endpoint)), parent_(parent),
       interval_timer_(parent.dispatcher_.createTimer([this]() -> void { onIntervalBase(); })),
       timeout_timer_(parent.dispatcher_.createTimer([this]() -> void { onTimeoutBase(); })) {
-
-  if (!host->endpoint()->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
+  if (!endpoint_->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
     parent.incHealthy();
   }
 
-  if (host->endpoint()->healthFlagGet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC)) {
+  if (endpoint_->healthFlagGet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC)) {
     parent.incDegraded();
   }
 }
 
 HealthCheckerImplBase::ActiveHealthCheckSession::~ActiveHealthCheckSession() {
-  if (!host_->endpoint()->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
+  if (!endpoint_->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
     parent_.decHealthy();
   }
-  if (host_->endpoint()->healthFlagGet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC)) {
+  if (endpoint_->healthFlagGet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC)) {
     parent_.decDegraded();
   }
 }
@@ -225,34 +235,40 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degrade
   num_unhealthy_ = 0;
 
   HealthTransition changed_state = HealthTransition::Unchanged;
-  if (host_->endpoint()->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
+  if (endpoint_->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
     // If this is the first time we ever got a check result on this host, we immediately move
     // it to healthy. This makes startup faster with a small reduction in overall reliability
     // depending on the HC settings.
     if (first_check_ || ++num_healthy_ == parent_.healthy_threshold_) {
-      host_->endpoint()->healthFlagClear(Endpoint::EndpointHealth::FAILED_ACTIVE_HC);
+      endpoint_->healthFlagClear(Endpoint::EndpointHealth::FAILED_ACTIVE_HC);
       parent_.incHealthy();
       changed_state = HealthTransition::Changed;
       if (parent_.event_logger_) {
-        parent_.event_logger_->logAddHealthy(parent_.healthCheckerType(), host_, first_check_);
+        for (const auto& host : parent_.host_by_endpoint_[endpoint_]) {
+          parent_.event_logger_->logAddHealthy(parent_.healthCheckerType(), host, first_check_);
+        }
       }
     } else {
       changed_state = HealthTransition::ChangePending;
     }
   }
 
-  if (degraded != host_->endpoint()->healthFlagGet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC)) {
+  if (degraded != endpoint_->healthFlagGet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC)) {
     if (degraded) {
-      host_->endpoint()->healthFlagSet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC);
+      endpoint_->healthFlagSet(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC);
       parent_.incDegraded();
       if (parent_.event_logger_) {
-        parent_.event_logger_->logDegraded(parent_.healthCheckerType(), host_);
+        for (const auto& host : parent_.host_by_endpoint_[endpoint_]) {
+          parent_.event_logger_->logDegraded(parent_.healthCheckerType(), host);
+        }
       }
     } else {
       if (parent_.event_logger_) {
-        parent_.event_logger_->logNoLongerDegraded(parent_.healthCheckerType(), host_);
+        for (const auto& host : parent_.host_by_endpoint_[endpoint_]) {
+          parent_.event_logger_->logNoLongerDegraded(parent_.healthCheckerType(), host);
+        }
       }
-      host_->endpoint()->healthFlagClear(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC);
+      endpoint_->healthFlagClear(Endpoint::EndpointHealth::DEGRADED_ACTIVE_HC);
     }
 
     // This check ensures that we honor the decision made about Changed vs ChangePending in the
@@ -265,7 +281,10 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degrade
 
   parent_.stats_.success_.inc();
   first_check_ = false;
-  parent_.runCallbacks(host_, changed_state);
+
+  for (const auto& host : parent_.host_by_endpoint_[endpoint_]) {
+    parent_.runCallbacks(host, changed_state);
+  }
 
   timeout_timer_->disableTimer();
   interval_timer_->enableTimer(parent_.interval(HealthState::Healthy, changed_state));
@@ -277,16 +296,17 @@ HealthTransition HealthCheckerImplBase::ActiveHealthCheckSession::setUnhealthy(
   num_healthy_ = 0;
 
   // TODO(snowp): Move health checks to be per endpoint, not per host.
-  auto endpoint = host_->endpoint();
   HealthTransition changed_state = HealthTransition::Unchanged;
-  if (!endpoint->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
+  if (!endpoint_->healthFlagGet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC)) {
     if (type != envoy::data::core::v2alpha::HealthCheckFailureType::NETWORK ||
         ++num_unhealthy_ == parent_.unhealthy_threshold_) {
-      endpoint->healthFlagSet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC);
+      endpoint_->healthFlagSet(Endpoint::EndpointHealth::FAILED_ACTIVE_HC);
       parent_.decHealthy();
       changed_state = HealthTransition::Changed;
       if (parent_.event_logger_) {
-        parent_.event_logger_->logEjectUnhealthy(parent_.healthCheckerType(), host_, type);
+        for (const auto& host : parent_.host_by_endpoint_[endpoint_]) {
+          parent_.event_logger_->logEjectUnhealthy(parent_.healthCheckerType(), host, type);
+        }
       }
     } else {
       changed_state = HealthTransition::ChangePending;
@@ -294,7 +314,9 @@ HealthTransition HealthCheckerImplBase::ActiveHealthCheckSession::setUnhealthy(
   }
 
   if ((first_check_ || parent_.always_log_health_check_failures_) && parent_.event_logger_) {
-    parent_.event_logger_->logUnhealthy(parent_.healthCheckerType(), host_, type, first_check_);
+    for (const auto& host : parent_.host_by_endpoint_[endpoint_]) {
+      parent_.event_logger_->logUnhealthy(parent_.healthCheckerType(), host, type, first_check_);
+    }
   }
 
   parent_.stats_.failure_.inc();
@@ -305,7 +327,10 @@ HealthTransition HealthCheckerImplBase::ActiveHealthCheckSession::setUnhealthy(
   }
 
   first_check_ = false;
-  parent_.runCallbacks(host_, changed_state);
+
+  for (const auto& host : parent_.host_by_endpoint_[endpoint_]) {
+    parent_.runCallbacks(host, changed_state);
+  }
   return changed_state;
 }
 
