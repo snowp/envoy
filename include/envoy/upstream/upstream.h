@@ -192,12 +192,14 @@ public:
 typedef std::shared_ptr<const Host> HostConstSharedPtr;
 
 typedef std::vector<HostSharedPtr> HostVector;
+typedef Phantom<HostVector, All> AllHostVector;
 typedef Phantom<HostVector, Healthy> HealthyHostVector;
 typedef Phantom<HostVector, Degraded> DegradedHostVector;
 typedef std::unordered_map<std::string, Upstream::HostSharedPtr> HostMap;
 typedef std::shared_ptr<HostVector> HostVectorSharedPtr;
 typedef std::shared_ptr<const HostVector> HostVectorConstSharedPtr;
 
+typedef std::shared_ptr<const AllHostVector> AllHostVectorConstSharedPtr;
 typedef std::shared_ptr<const HealthyHostVector> HealthyHostVectorConstSharedPtr;
 typedef std::shared_ptr<const DegradedHostVector> DegradedHostVectorConstSharedPtr;
 
@@ -247,6 +249,12 @@ public:
 
 typedef std::shared_ptr<HostsPerLocality> HostsPerLocalitySharedPtr;
 typedef std::shared_ptr<const HostsPerLocality> HostsPerLocalityConstSharedPtr;
+
+// Note: Since HostsPerLocality is a abstract class we need to wrap the pointer with 
+// phantom types, as the phantom type must hold a concrete type.
+typedef Phantom<std::shared_ptr<const HostsPerLocality>, All> AllHostsPerLocalityConstSharedPtr;
+typedef Phantom<std::shared_ptr<const HostsPerLocality>, Healthy> HealthyHostsPerLocalityConstSharedPtr;
+typedef Phantom<std::shared_ptr<const HostsPerLocality>, Degraded> DegradedHostsPerLocalityConstSharedPtr;
 
 // Weight for each locality index in HostsPerLocality.
 typedef std::vector<uint32_t> LocalityWeights;
@@ -372,12 +380,12 @@ public:
    * Parameter class for updateHosts.
    */
   struct UpdateHostsParams {
-    HostVectorConstSharedPtr hosts;
+    AllHostVectorConstSharedPtr hosts;
     HealthyHostVectorConstSharedPtr healthy_hosts;
     DegradedHostVectorConstSharedPtr degraded_hosts;
-    HostsPerLocalityConstSharedPtr hosts_per_locality;
-    HostsPerLocalityConstSharedPtr healthy_hosts_per_locality;
-    HostsPerLocalityConstSharedPtr degraded_hosts_per_locality;
+    AllHostsPerLocalityConstSharedPtr hosts_per_locality;
+    HealthyHostsPerLocalityConstSharedPtr healthy_hosts_per_locality;
+    DegradedHostsPerLocalityConstSharedPtr degraded_hosts_per_locality;
   };
 
   /**

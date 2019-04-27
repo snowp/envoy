@@ -149,10 +149,10 @@ void OriginalDstCluster::addHost(HostSharedPtr& host) {
   // Given the current config, only EDS clusters support multiple priorities.
   ASSERT(priority_set_.hostSetsPerPriority().size() == 1);
   const auto& first_host_set = priority_set_.getOrCreateHostSet(0);
-  HostVectorSharedPtr new_hosts(new HostVector(first_host_set.hosts()));
+  auto new_hosts = std::make_shared<HostVector>(first_host_set.hosts());
   new_hosts->emplace_back(host);
   priority_set_.updateHosts(0,
-                            HostSetImpl::partitionHosts(new_hosts, HostsPerLocalityImpl::empty()),
+                            HostSetImpl::partitionHosts(new_hosts, HostsPerLocalityImpl::empty(), true),
                             {}, {std::move(host)}, {}, absl::nullopt);
 }
 
@@ -179,7 +179,7 @@ void OriginalDstCluster::cleanup() {
 
   if (!to_be_removed.empty()) {
     priority_set_.updateHosts(0,
-                              HostSetImpl::partitionHosts(new_hosts, HostsPerLocalityImpl::empty()),
+                              HostSetImpl::partitionHosts(new_hosts, HostsPerLocalityImpl::empty(), true),
                               {}, {}, to_be_removed, absl::nullopt);
   }
 

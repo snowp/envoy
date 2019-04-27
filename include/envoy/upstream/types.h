@@ -51,6 +51,8 @@ struct HealthyAvailability : PriorityAvailability {
   using PriorityAvailability::PriorityAvailability;
 };
 
+// Phantom type indicating that the type is related to "all" hosts.
+struct All {};
 // Phantom type indicating that the type is related to healthy hosts.
 struct Healthy {};
 // Phantom type indicating that the type is related to degraded hosts.

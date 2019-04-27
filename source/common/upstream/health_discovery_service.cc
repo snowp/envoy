@@ -257,7 +257,7 @@ void HdsCluster::initialize(std::function<void()> callback) {
   }
 
   priority_set_.updateHosts(
-      0, HostSetImpl::partitionHosts(initial_hosts_, HostsPerLocalityImpl::empty()), {},
+      0, HostSetImpl::partitionHosts(initial_hosts_, HostsPerLocalityImpl::empty(), true), {},
       *initial_hosts_, {}, absl::nullopt);
 }
 
