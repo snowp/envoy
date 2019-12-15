@@ -322,13 +322,13 @@ private:
  * implementations with different configuration. For now, as we iterate everything is contained
  * within this implementation.
  */
-class DetectorImpl : public Detector, public std::enable_shared_from_this<DetectorImpl> {
+class HostDetectorImpl : public Detector, public std::enable_shared_from_this<HostDetectorImpl> {
 public:
-  static std::shared_ptr<DetectorImpl>
+  static std::shared_ptr<HostDetectorImpl>
   create(const Cluster& cluster, const envoy::api::v2::cluster::OutlierDetection& config,
          Event::Dispatcher& dispatcher, Runtime::Loader& runtime, TimeSource& time_source,
          EventLoggerSharedPtr event_logger);
-  ~DetectorImpl() override;
+  ~HostDetectorImpl() override;
 
   void onConsecutive5xx(HostSharedPtr host);
   void onConsecutiveGatewayFailure(HostSharedPtr host);
@@ -366,7 +366,7 @@ public:
                                double success_rate_stdev_factor);
 
 private:
-  DetectorImpl(const Cluster& cluster, const envoy::api::v2::cluster::OutlierDetection& config,
+  HostDetectorImpl(const Cluster& cluster, const envoy::api::v2::cluster::OutlierDetection& config,
                Event::Dispatcher& dispatcher, Runtime::Loader& runtime, TimeSource& time_source,
                EventLoggerSharedPtr event_logger);
 
@@ -412,7 +412,7 @@ private:
   }
   EjectionPair& getSRNums(DetectorHostMonitor::SuccessRateMonitorType monitor_type) {
     return const_cast<EjectionPair&>(
-        static_cast<const DetectorImpl&>(*this).getSRNums(monitor_type));
+        static_cast<const HostDetectorImpl&>(*this).getSRNums(monitor_type));
   }
 };
 

@@ -294,6 +294,18 @@ public:
    *         occurred an empty string is returned.
    */
   virtual absl::string_view transportFailureReason() const PURE;
+
+  /**
+   * @return bool whether this connection is considered healthy. A connection might be marked 
+   * as unhealthy due to outlier detection.
+   */ 
+  virtual bool healthy() const PURE;
+
+  /**
+   * Updates the health status of this connection.
+   * @param healthy the health status of this connection.
+   */ 
+  virtual void healthy(bool healthy) PURE;
 };
 
 using ConnectionPtr = std::unique_ptr<Connection>;

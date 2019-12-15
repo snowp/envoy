@@ -48,27 +48,22 @@ enum class Result {
 };
 
 /**
- * Monitor for per host data. Proxy filters should send pertinent data when available.
+ * Monitor that tracks results. Proxy filters should send pertinent data when available.
  */
-class DetectorHostMonitor {
+class DetectorMonitor {
 public:
   // Types of Success Rate monitors.
   enum class SuccessRateMonitorType { ExternalOrigin, LocalOrigin };
 
-  virtual ~DetectorHostMonitor() = default;
+  virtual ~DetectorMonitor() = default;
 
   /**
-   * @return the number of times this host has been ejected.
-   */
-  virtual uint32_t numEjections() PURE;
-
-  /**
-   * Add an HTTP response code for a host.
+   * Record an HTTP response code.
    */
   virtual void putHttpResponseCode(uint64_t code) PURE;
 
   /**
-   * Add a non-HTTP result for a host.
+   * Record a non-HTTP result.
    * Some non-HTTP codes like TIMEOUT may require special mapping to HTTP code
    * and such code may be passed as optional parameter.
    */
@@ -81,22 +76,10 @@ public:
   void putResult(Result result) { putResult(result, absl::nullopt); }
 
   /**
-   * Add a response time for a host (in this case response time is generic and might be used for
+   * Record a response time (in this case response time is generic and might be used for
    * different operations including HTTP, Mongo, Redis, etc.).
    */
   virtual void putResponseTime(std::chrono::milliseconds time) PURE;
-
-  /**
-   * Get the time of last ejection.
-   * @return the last time this host was ejected, if the host has been ejected previously.
-   */
-  virtual const absl::optional<MonotonicTime>& lastEjectionTime() PURE;
-
-  /**
-   * Get the time of last unejection.
-   * @return the last time this host was unejected, if the host has been unejected previously.
-   */
-  virtual const absl::optional<MonotonicTime>& lastUnejectionTime() PURE;
 
   /**
    * @return the success rate of the host in the last calculated interval, in the range 0-100.
@@ -110,6 +93,29 @@ public:
    * and LocalOrigin type returns success rate for local origin errors.
    */
   virtual double successRate(SuccessRateMonitorType type) const PURE;
+};
+
+/**
+ * Tracks ejection time/stats for a given host.
+ */
+class DetectorHostMonitor :  public DetectorMonitor {
+public:
+  /**
+   * @return the number of times this host has been ejected.
+   */
+  virtual uint32_t numEjections() PURE;
+
+  /**
+   * Get the time of last ejection.
+   * @return the last time this host was ejected, if the host has been ejected previously.
+   */
+  virtual const absl::optional<MonotonicTime>& lastEjectionTime() PURE;
+
+  /**
+   * Get the time of last unejection.
+   * @return the last time this host was unejected, if the host has been unejected previously.
+   */
+  virtual const absl::optional<MonotonicTime>& lastUnejectionTime() PURE;
 };
 
 using DetectorHostMonitorPtr = std::unique_ptr<DetectorHostMonitor>;

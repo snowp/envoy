@@ -19,6 +19,8 @@ public:
   uint64_t id() const override { return id_; }
   void setConnectionStats(const ConnectionStats& stats) override;
   void setDelayedCloseTimeout(std::chrono::milliseconds timeout) override;
+  bool healthy() const override;
+  void healthy(bool healthy) override;
 
 protected:
   void initializeDelayedCloseTimer();
@@ -50,6 +52,7 @@ protected:
   const uint64_t id_;
   std::list<ConnectionCallbacks*> callbacks_;
   std::unique_ptr<ConnectionStats> connection_stats_;
+  bool healthy_{true};
 
 private:
   // Callback issued when a delayed close timeout triggers.
