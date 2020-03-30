@@ -171,6 +171,7 @@ envoy_cc_library(
     ],
     deps = [
         ":codes_lib",
+        ":filter_manager_lib",
         ":conn_manager_config_interface",
         ":exception_lib",
         ":header_map_lib",
@@ -249,6 +250,25 @@ envoy_cc_library(
     name = "exception_lib",
     hdrs = ["exception.h"],
     deps = ["//include/envoy/http:header_map_interface"],
+)
+
+envoy_cc_library(
+    name = "filter_manager_lib",
+    hdrs = ["filter_manager.h"],
+    srcs = ["filter_manager.cc"],
+    deps = [
+        "//include/envoy/http:header_map_interface", 
+        "//include/envoy/router:scopes_interface", 
+        "//include/envoy/http:filter_interface",
+        ":header_map_lib",
+        "//source/common/common:linked_object",
+        "//source/common/common:scope_tracker",
+        "//source/common/tracing:http_tracer_lib",
+        "//source/common/router:config_lib",
+        "//source/common/buffer:watermark_buffer_lib",
+        "//source/common/stream_info:stream_info_lib",
+        "//source/common/grpc:common_lib",
+    ],
 )
 
 envoy_cc_library(
