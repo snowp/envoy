@@ -497,7 +497,8 @@ ConnectionManagerImpl::ActiveStream::ActiveStream(ConnectionManagerImpl& connect
           connection_manager_.stats_.named_.downstream_rq_time_, connection_manager_.timeSource())),
       stream_info_(connection_manager_.codec_->protocol(), connection_manager_.timeSource(),
                    connection_manager.filterState()),
-      upstream_options_(std::make_shared<Network::Socket::Options>()), saw_connection_close_(false), decorated_propagate_(false) {
+      upstream_options_(std::make_shared<Network::Socket::Options>()), saw_connection_close_(false),
+      decorated_propagate_(false) {
   ASSERT(!connection_manager.config_.isRoutable() ||
              ((connection_manager.config_.routeConfigProvider() == nullptr &&
                connection_manager.config_.scopedRouteConfigProvider() != nullptr) ||
@@ -577,7 +578,6 @@ ConnectionManagerImpl::ActiveStream::~ActiveStream() {
   if (stream_info_.healthCheck()) {
     connection_manager_.config_.tracingStats().health_check_.inc();
   }
-
 }
 
 void ConnectionManagerImpl::ActiveStream::resetIdleTimer() {
@@ -591,14 +591,13 @@ void ConnectionManagerImpl::ActiveStream::resetIdleTimer() {
 
 void ConnectionManagerImpl::ActiveStream::addStreamDecoderFilterWorker(
     StreamDecoderFilterSharedPtr filter, bool dual_filter) {
-      filter_manager_.addStreamDecoderFilter(filter, dual_filter);
+  filter_manager_.addStreamDecoderFilter(filter, dual_filter);
 }
 
 void ConnectionManagerImpl::ActiveStream::addStreamEncoderFilterWorker(
     StreamEncoderFilterSharedPtr filter, bool dual_filter) {
   filter_manager_.addStreamEncoderFilter(filter, dual_filter);
 }
-
 
 void ConnectionManagerImpl::ActiveStream::chargeStats(const ResponseHeaderMap& headers) {
   uint64_t response_code = Utility::getResponseStatus(headers);
@@ -784,8 +783,7 @@ void ConnectionManagerImpl::ActiveStream::decodeHeaders(RequestHeaderMapPtr&& he
   // Note: Proxy-Connection is not a standard header, but is supported here
   // since it is supported by http-parser the underlying parser for http
   // requests.
-  if (protocol < Protocol::Http2 && !saw_connection_close_ &&
-      request_headers_->ProxyConnection() &&
+  if (protocol < Protocol::Http2 && !saw_connection_close_ && request_headers_->ProxyConnection() &&
       absl::EqualsIgnoreCase(request_headers_->ProxyConnection()->value().getStringView(),
                              Http::Headers::get().ConnectionValues.Close)) {
     saw_connection_close_ = true;
@@ -868,7 +866,6 @@ void ConnectionManagerImpl::ActiveStream::traceRequest() {
     return;
   }
 
-
   // TODO: Need to investigate the following code based on the cached route, as may
   // be broken in the case a filter changes the route.
 
@@ -919,10 +916,12 @@ void ConnectionManagerImpl::ActiveStream::decodeData(Buffer::Instance& data, boo
   maybeEndDecode(end_stream);
   stream_info_.addBytesReceived(data.length());
 
-  filter_manager_.decodeData(nullptr, data, end_stream, FilterIterationStartState::CanStartFromCurrent);
+  filter_manager_.decodeData(nullptr, data, end_stream,
+                             FilterIterationStartState::CanStartFromCurrent);
 }
 
-Router::ConfigConstSharedPtr ConnectionManagerImpl::ActiveStream::scopedRouteConfig(const RequestHeaderMap& request_headers) {
+Router::ConfigConstSharedPtr
+ConnectionManagerImpl::ActiveStream::scopedRouteConfig(const RequestHeaderMap& request_headers) {
   // NOTE: if a RDS subscription hasn't got a RouteConfiguration back, a Router::NullConfigImpl is
   // returned, in that case we let it pass.
   auto snapped_route_config = snapped_scoped_routes_config_->getRouteConfig(*request_headers_);
@@ -1097,7 +1096,8 @@ void ConnectionManagerImpl::ActiveStream::encodeHeadersInternal(ResponseHeaderMa
       // should be used to override the active span's operation.
       if (resp_operation_override) {
         if (!resp_operation_override->value().empty() && filter_manager_.active_span_) {
-          filter_manager_.active_span_->setOperation(resp_operation_override->value().getStringView());
+          filter_manager_.active_span_->setOperation(
+              resp_operation_override->value().getStringView());
         }
         // Remove header so not propagated to service.
         headers.removeEnvoyDecoratorOperation();
@@ -1125,8 +1125,8 @@ void ConnectionManagerImpl::ActiveStream::maybeEndEncode(bool end_stream) {
   }
 }
 
-void ConnectionManagerImpl::ActiveStream::encodeFiltered100ContinueHeaders(const Http::RequestHeaderMap& request_headers,
-    Http::ResponseHeaderMap& headers) override {
+void ConnectionManagerImpl::ActiveStream::encodeFiltered100ContinueHeaders(
+    const Http::RequestHeaderMap& request_headers, Http::ResponseHeaderMap& headers) override {
   // Strip the T-E headers etc. Defer other header additions as well as drain-close logic to the
   // continuation headers.
   ConnectionManagerUtility::mutateResponseHeaders(headers, request_headers, EMPTY_STRING);

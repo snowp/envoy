@@ -1,18 +1,19 @@
 #pragma once
+#include "envoy/common/scope_tracker.h"
 #include "envoy/http/filter.h"
 #include "envoy/http/header_map.h"
-#include "common/common/linked_object.h"
-#include "common/buffer/watermark_buffer.h"
-#include "envoy/common/scope_tracker.h"
-#include "common/common/scope_tracker.h"
-#include "common/router/config_impl.h"
-#include "envoy/upstream/cluster_manager.h"
-#include "common/http/header_map_impl.h"
-#include "common/http/codes.h"
-#include "common/grpc/common.h"
-#include "common/tracing/http_tracer_impl.h"
 #include "envoy/router/scopes.h"
+#include "envoy/upstream/cluster_manager.h"
+
+#include "common/buffer/watermark_buffer.h"
+#include "common/common/linked_object.h"
+#include "common/common/scope_tracker.h"
+#include "common/grpc/common.h"
+#include "common/http/codes.h"
+#include "common/http/header_map_impl.h"
+#include "common/router/config_impl.h"
 #include "common/stream_info/stream_info_impl.h"
+#include "common/tracing/http_tracer_impl.h"
 
 namespace Envoy {
 namespace Http {
@@ -35,7 +36,8 @@ public:
   virtual void decodeFilteredData(Buffer::Instance&& data, bool end_stream) PURE;
   virtual bool decodeFilteredTrailers(Http::RequestTrailerMap& trailers) PURE;
 
-  virtual void encodeFiltered100ContinueHeaders(const Http::RequestHeaderMap& request_headers, Http::ResponseHeaderMap& response_headers) PURE;
+  virtual void encodeFiltered100ContinueHeaders(const Http::RequestHeaderMap& request_headers,
+                                                Http::ResponseHeaderMap& response_headers) PURE;
   virtual void encodeFilteredHeaders(Http::ResponseHeaderMap& headers, bool end_stream) PURE;
   virtual void encodeFilteredMetadata(MetadataMapVector&& metadata) PURE;
   virtual void encodeFilteredData(Buffer::Instance&& data, bool end_stream) PURE;
@@ -94,11 +96,11 @@ public:
           *active_span_, request_headers_.get(), response_headers_.get(), response_trailers_.get(),
           stream_info_, tracing_config_);
     }
-  if (state_.successful_upgrade_) {
-    callbacks_.decUpgrade();
-  }
+    if (state_.successful_upgrade_) {
+      callbacks_.decUpgrade();
+    }
 
-  ASSERT(state_.filter_call_state_ == 0);
+    ASSERT(state_.filter_call_state_ == 0);
   }
 
   // ScopeTrackedObject
@@ -464,9 +466,9 @@ private:
   struct State {
     State()
         : remote_complete_(false), local_complete_(false), codec_saw_local_complete_(false),
-          successful_upgrade_(false), created_filter_chain_(false),
-          is_internally_created_(false), has_continue_headers_(false),
-          is_head_request_(false), decoding_headers_only_(false), encoding_headers_only_(false) {}
+          successful_upgrade_(false), created_filter_chain_(false), is_internally_created_(false),
+          has_continue_headers_(false), is_head_request_(false), decoding_headers_only_(false),
+          encoding_headers_only_(false) {}
 
     uint32_t filter_call_state_{0};
     // The following 3 members are booleans rather than part of the space-saving bitfield as they
@@ -509,28 +511,27 @@ private:
 
 public:
   void doDeferredDestroy() {
-  if (max_stream_duration_timer_) {
-    max_stream_duration_timer_->disableTimer();
-    max_stream_duration_timer_ = nullptr;
-  }
-  if (stream_idle_timer_ != nullptr) {
-    stream_idle_timer_->disableTimer();
-    stream_idle_timer_ = nullptr;
-  }
-  disarmRequestTimeout();
+    if (max_stream_duration_timer_) {
+      max_stream_duration_timer_->disableTimer();
+      max_stream_duration_timer_ = nullptr;
+    }
+    if (stream_idle_timer_ != nullptr) {
+      stream_idle_timer_->disableTimer();
+      stream_idle_timer_ = nullptr;
+    }
+    disarmRequestTimeout();
 
-  state_.destroyed_ = true;
-  for (auto& filter : decoder_filters_) {
-    filter->handle_->onDestroy();
-  }
-
-  for (auto& filter : encoder_filters_) {
-    // Do not call on destroy twice for dual registered filters.
-    if (!filter->dual_filter_) {
+    state_.destroyed_ = true;
+    for (auto& filter : decoder_filters_) {
       filter->handle_->onDestroy();
     }
-  }
 
+    for (auto& filter : encoder_filters_) {
+      // Do not call on destroy twice for dual registered filters.
+      if (!filter->dual_filter_) {
+        filter->handle_->onDestroy();
+      }
+    }
   }
   bool remoteComplete() const { return state_.remote_complete_; }
 
@@ -650,7 +651,6 @@ public:
   };
 
 private:
-
   ResponseHeaderMapPtr continue_headers_;
   ResponseHeaderMapPtr response_headers_;
   Buffer::WatermarkBufferPtr buffered_response_data_;
@@ -684,7 +684,7 @@ private:
   State state_;
   std::unique_ptr<Tracing::CustomTagMap> tracing_custom_tags_{nullptr};
   std::list<DownstreamWatermarkCallbacks*> watermark_callbacks_{};
-    std::unique_ptr<RouteConfigUpdateRequester> route_config_update_requester_;
+  std::unique_ptr<RouteConfigUpdateRequester> route_config_update_requester_;
   uint32_t high_watermark_count_{0};
   // Per-stream idle timeout.
   Event::TimerPtr stream_idle_timer_;

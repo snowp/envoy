@@ -156,7 +156,8 @@ private:
     void encodeDataInternal(Buffer::Instance& data, bool end_stream);
 
     // FilterManagerCallbacks
-    void encodeFiltered100ContinueHeaders(const Http::RequestHeaderMap& request_headers, Http::ResponseHeaderMap& response_headers) override;
+    void encodeFiltered100ContinueHeaders(const Http::RequestHeaderMap& request_headers,
+                                          Http::ResponseHeaderMap& response_headers) override;
     void encodeFilteredHeaders(Http::ResponseHeaderMap& headers, bool end_stream) override {
       encodeHeadersInternal(headers, end_stream);
     }
@@ -184,9 +185,7 @@ private:
       connection_manager_.doEndStream(*this);
     }
 
-    void endStream() override {
-      connection_manager_.doEndStream(*this);
-    }
+    void endStream() override { connection_manager_.doEndStream(*this); }
 
     RequestHeaderMapPtr newStream(RequestHeaderMapPtr&& request_headers) override {
       // n.b. we do not currently change the codecs to point at the new stream
@@ -237,8 +236,8 @@ private:
 
     void traceRequest();
 
-  // Updates the snapped_route_config_ (by reselecting scoped route configuration), if a scope is
-  // not found, snapped_route_config_ is set to Router::NullConfigImpl.
+    // Updates the snapped_route_config_ (by reselecting scoped route configuration), if a scope is
+    // not found, snapped_route_config_ is set to Router::NullConfigImpl.
     void snapScopedRouteConfig();
     void
     requestRouteConfigUpdate(Event::Dispatcher& thread_local_dispatcher,
