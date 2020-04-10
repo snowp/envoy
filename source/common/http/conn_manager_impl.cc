@@ -167,17 +167,9 @@ void ConnectionManagerImpl::doEndStream(ActiveStream& stream) {
   // here is when Envoy "ends" the stream by calling recreateStream at which point recreateStream
   // explicitly nulls out response_encoder to avoid the downstream being notified of the
   // Envoy-internal stream instance being ended.
-  if (stream.response_encoder_ != nullptr &&
-      (!stream.state_.remote_complete_ || !stream.state_.codec_saw_local_complete_)) {
-    // Indicate local is complete at this point so that if we reset during a continuation, we don't
-    // raise further data or trailers.
-    ENVOY_STREAM_LOG(debug, "doEndStream() resetting stream", stream);
-    stream.state_.local_complete_ = true;
-    stream.state_.codec_saw_local_complete_ = true;
-    stream.response_encoder_->getStream().resetStream(StreamResetReason::LocalReset);
-    reset_stream = true;
+  if (stream.response_encoder_ != nullptr) {
+    reset_stream = stream.filter_manager_.doEndStream();
   }
-
   if (!reset_stream) {
     doDeferredStreamDestroy(stream);
   }

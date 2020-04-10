@@ -44,6 +44,10 @@ public:
   virtual void encodeFilteredData(Buffer::Instance& data, bool end_stream) PURE;
   virtual void encodeFilteredTrailers(Http::ResponseTrailerMap& trailers) PURE;
 
+  // Triggers a local reset of the downstream stream.
+  virtual void resetStream() PURE;
+
+  // Requests for the stream to be shut down.
   virtual void endStream() PURE;
 
   virtual void requestTooLarge() PURE;
@@ -57,6 +61,8 @@ public:
   virtual void onIdleTimeout() PURE;
   virtual void onRequestTimeout() PURE;
   virtual void onStreamMaxDurationReached() PURE;
+
+  virtual Http1StreamEncoderOptionsOptRef http1StreamEncoderOptions() PURE;
   // Returns headers if the stream creation failed, passing ownership back to the caller.
   virtual RequestHeaderMapPtr newStream(RequestHeaderMapPtr&& request_headers);
 
@@ -143,6 +149,22 @@ public:
     ActiveStreamEncoderFilterPtr wrapper(new ActiveStreamEncoderFilter(*this, filter, dual_filter));
     filter->setEncoderFilterCallbacks(*wrapper);
     wrapper->moveIntoList(std::move(wrapper), encoder_filters_);
+  }
+
+  bool doEndStream() {
+    if (!state_.remote_complete_ || !state_.codec_saw_local_complete_) {
+      // Indicate local is complete at this point so that if we reset during a continuation, we
+      // don't raise further data or trailers.
+      ENVOY_STREAM_LOG(debug, "doEndStream() resetting stream", *this);
+      state_.local_complete_ = true;
+      state_.codec_saw_local_complete_ = true;
+
+      callbacks_.resetStream();
+      // stream.response_encoder_->getStream().resetStream(StreamResetReason::LocalReset);
+      return true;
+    }
+
+    return false;
   }
 
 private:
@@ -431,6 +453,12 @@ private:
     void modifyEncodingBuffer(std::function<void(Buffer::Instance&)> callback) override {
       ASSERT(parent_.state_.latest_data_encoding_filter_ == this);
       callback(*parent_.buffered_response_data_.get());
+    }
+    Http1StreamEncoderOptionsOptRef http1StreamEncoderOptions() override {
+      // TODO(mattklein123): At some point we might want to actually wrap this interface but for now
+      // we give the filter direct access to the encoder options.
+      return parent_.callbacks_.http1StreamEncoderOptions();
+      // return parent_.response_encoder_->http1StreamEncoderOptions(); TODO
     }
 
     void responseDataTooLarge();
