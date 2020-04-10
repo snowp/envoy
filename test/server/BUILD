@@ -2,9 +2,10 @@ licenses(["notice"])  # Apache 2
 
 load(
     "//bazel:envoy_build_system.bzl",
+    "envoy_benchmark_test",
+    "envoy_cc_benchmark_binary",
     "envoy_cc_fuzz_test",
     "envoy_cc_test",
-    "envoy_cc_test_binary",
     "envoy_cc_test_library",
     "envoy_package",
     "envoy_select_hot_restart",
@@ -348,6 +349,7 @@ envoy_cc_test(
         "//source/extensions/filters/network/redis_proxy:config",
         "//source/extensions/stat_sinks/statsd:config",
         "//source/extensions/tracers/zipkin:config",
+        "//source/server:process_context_lib",
         "//source/server:server_lib",
         "//test/common/stats:stat_test_utility_lib",
         "//test/integration:integration_lib",
@@ -396,7 +398,7 @@ envoy_cc_test(
     ],
 )
 
-envoy_cc_test_binary(
+envoy_cc_benchmark_binary(
     name = "filter_chain_benchmark_test",
     srcs = ["filter_chain_benchmark_test.cc"],
     external_deps = [
@@ -412,4 +414,10 @@ envoy_cc_test_binary(
         # tranport socket config registration
         "//source/extensions/transport_sockets/tls:config",
     ],
+)
+
+envoy_benchmark_test(
+    name = "filter_chain_benchmark_test_benchmark_test",
+    timeout = "long",
+    benchmark_binary = "filter_chain_benchmark_test",
 )

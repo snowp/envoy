@@ -229,6 +229,10 @@ RequestDecoder& ConnectionManagerImpl::newStream(ResponseEncoder& response_encod
 
 void ConnectionManagerImpl::handleCodecException(const char* error) {
   ENVOY_CONN_LOG(debug, "dispatch error: {}", read_callbacks_->connection(), error);
+  read_callbacks_->connection().streamInfo().setResponseCodeDetails(
+      absl::StrCat("codec error: ", error));
+  read_callbacks_->connection().streamInfo().setResponseFlag(
+      StreamInfo::ResponseFlag::DownstreamProtocolError);
 
   // HTTP/1.1 codec has already sent a 400 response if possible. HTTP/2 codec has already sent
   // GOAWAY.
@@ -270,19 +274,6 @@ Network::FilterStatus ConnectionManagerImpl::onData(Buffer::Instance& data, bool
     try {
       codec_->dispatch(data);
     } catch (const FrameFloodException& e) {
-      // TODO(mattklein123): This is an emergency substitute for the lack of connection level
-      // logging in the HCM. In a public follow up change we will add full support for connection
-      // level logging in the HCM, similar to what we have in tcp_proxy. This will allow abuse
-      // indicators to be stored in the connection level stream info, and then matched, sampled,
-      // etc. when logged.
-      const envoy::type::v3::FractionalPercent default_value; // 0
-      if (runtime_.snapshot().featureEnabled("http.connection_manager.log_flood_exception",
-                                             default_value)) {
-        ENVOY_CONN_LOG(warn, "downstream HTTP flood from IP '{}': {}",
-                       read_callbacks_->connection(),
-                       read_callbacks_->connection().remoteAddress()->asString(), e.what());
-      }
-
       handleCodecException(e.what());
       return Network::FilterStatus::StopIteration;
     } catch (const CodecProtocolException& e) {
@@ -309,6 +300,10 @@ Network::FilterStatus ConnectionManagerImpl::onData(Buffer::Instance& data, bool
       }
     }
   } while (redispatch);
+
+  if (!read_callbacks_->connection().streamInfo().protocol()) {
+    read_callbacks_->connection().streamInfo().protocol(codec_->protocol());
+  }
 
   return Network::FilterStatus::StopIteration;
 }
@@ -506,6 +501,9 @@ ConnectionManagerImpl::ActiveStream::ActiveStream(ConnectionManagerImpl& connect
                connection_manager.config_.scopedRouteConfigProvider() == nullptr)),
          "Either routeConfigProvider or scopedRouteConfigProvider should be set in "
          "ConnectionManagerImpl.");
+
+  stream_info_.setRequestIDExtension(connection_manager.config_.requestIDExtension());
+
   if (connection_manager_.config_.isRoutable() &&
       connection_manager.config_.routeConfigProvider() != nullptr) {
     route_config_update_requester_ =
@@ -793,8 +791,7 @@ void ConnectionManagerImpl::ActiveStream::decodeHeaders(RequestHeaderMapPtr&& he
     // Modify the downstream remote address depending on configuration and headers.
     stream_info_.setDownstreamRemoteAddress(ConnectionManagerUtility::mutateRequestHeaders(
         *request_headers_, connection_manager_.read_callbacks_->connection(),
-        connection_manager_.config_, *snapped_route_config_, connection_manager_.random_generator_,
-        connection_manager_.local_info_));
+        connection_manager_.config_, *snapped_route_config_, connection_manager_.local_info_));
   }
   ASSERT(stream_info_.downstreamRemoteAddress() != nullptr);
 
@@ -1005,6 +1002,110 @@ void ConnectionManagerImpl::ActiveStream::sendLocalReply(
       state_.destroyed_, code, body, grpc_status, is_head_request);
 }
 
+<<<<<<< HEAD
+=======
+void ConnectionManagerImpl::ActiveStream::encode100ContinueHeaders(
+    ActiveStreamEncoderFilter* filter, ResponseHeaderMap& headers) {
+  resetIdleTimer();
+  ASSERT(connection_manager_.config_.proxy100Continue());
+  // Make sure commonContinue continues encode100ContinueHeaders.
+  state_.has_continue_headers_ = true;
+
+  // Similar to the block in encodeHeaders, run encode100ContinueHeaders on each
+  // filter. This is simpler than that case because 100 continue implies no
+  // end-stream, and because there are normal headers coming there's no need for
+  // complex continuation logic.
+  // 100-continue filter iteration should always start with the next filter if available.
+  std::list<ActiveStreamEncoderFilterPtr>::iterator entry =
+      commonEncodePrefix(filter, false, FilterIterationStartState::AlwaysStartFromNext);
+  for (; entry != encoder_filters_.end(); entry++) {
+    ASSERT(!(state_.filter_call_state_ & FilterCallState::Encode100ContinueHeaders));
+    state_.filter_call_state_ |= FilterCallState::Encode100ContinueHeaders;
+    FilterHeadersStatus status = (*entry)->handle_->encode100ContinueHeaders(headers);
+    state_.filter_call_state_ &= ~FilterCallState::Encode100ContinueHeaders;
+    ENVOY_STREAM_LOG(trace, "encode 100 continue headers called: filter={} status={}", *this,
+                     static_cast<const void*>((*entry).get()), static_cast<uint64_t>(status));
+    if (!(*entry)->commonHandleAfter100ContinueHeadersCallback(status)) {
+      return;
+    }
+  }
+
+  // Strip the T-E headers etc. Defer other header additions as well as drain-close logic to the
+  // continuation headers.
+  ConnectionManagerUtility::mutateResponseHeaders(headers, request_headers_.get(),
+                                                  connection_manager_.config_.requestIDExtension(),
+                                                  EMPTY_STRING);
+
+  // Count both the 1xx and follow-up response code in stats.
+  chargeStats(headers);
+
+  ENVOY_STREAM_LOG(debug, "encoding 100 continue headers via codec:\n{}", *this, headers);
+
+  // Now actually encode via the codec.
+  response_encoder_->encode100ContinueHeaders(headers);
+}
+
+void ConnectionManagerImpl::ActiveStream::encodeHeaders(ActiveStreamEncoderFilter* filter,
+                                                        ResponseHeaderMap& headers,
+                                                        bool end_stream) {
+  resetIdleTimer();
+  disarmRequestTimeout();
+
+  // Headers filter iteration should always start with the next filter if available.
+  std::list<ActiveStreamEncoderFilterPtr>::iterator entry =
+      commonEncodePrefix(filter, end_stream, FilterIterationStartState::AlwaysStartFromNext);
+  std::list<ActiveStreamEncoderFilterPtr>::iterator continue_data_entry = encoder_filters_.end();
+
+  for (; entry != encoder_filters_.end(); entry++) {
+    ASSERT(!(state_.filter_call_state_ & FilterCallState::EncodeHeaders));
+    state_.filter_call_state_ |= FilterCallState::EncodeHeaders;
+    (*entry)->end_stream_ = state_.encoding_headers_only_ ||
+                            (end_stream && continue_data_entry == encoder_filters_.end());
+    FilterHeadersStatus status = (*entry)->handle_->encodeHeaders(headers, (*entry)->end_stream_);
+    if ((*entry)->end_stream_) {
+      (*entry)->handle_->encodeComplete();
+    }
+    state_.filter_call_state_ &= ~FilterCallState::EncodeHeaders;
+    ENVOY_STREAM_LOG(trace, "encode headers called: filter={} status={}", *this,
+                     static_cast<const void*>((*entry).get()), static_cast<uint64_t>(status));
+
+    (*entry)->encode_headers_called_ = true;
+    const auto continue_iteration =
+        (*entry)->commonHandleAfterHeadersCallback(status, state_.encoding_headers_only_);
+
+    // If we're encoding a headers only response, then mark the local as complete. This ensures
+    // that we don't attempt to reset the downstream request in doEndStream.
+    if (state_.encoding_headers_only_) {
+      state_.local_complete_ = true;
+    }
+
+    if (!continue_iteration) {
+      return;
+    }
+
+    // Here we handle the case where we have a header only response, but a filter adds a body
+    // to it. We need to not raise end_stream = true to further filters during inline iteration.
+    if (end_stream && buffered_response_data_ && continue_data_entry == encoder_filters_.end()) {
+      continue_data_entry = entry;
+    }
+  }
+
+  const bool modified_end_stream = state_.encoding_headers_only_ ||
+                                   (end_stream && continue_data_entry == encoder_filters_.end());
+  encodeHeadersInternal(headers, modified_end_stream);
+
+  if (continue_data_entry != encoder_filters_.end() && !modified_end_stream) {
+    // We use the continueEncoding() code since it will correctly handle not calling
+    // encodeHeaders() again. Fake setting StopSingleIteration since the continueEncoding() code
+    // expects it.
+    ASSERT(buffered_response_data_);
+    (*continue_data_entry)->iteration_state_ =
+        ActiveStreamFilterBase::IterationState::StopSingleIteration;
+    (*continue_data_entry)->continueEncoding();
+  }
+}
+
+>>>>>>> envoy/master
 void ConnectionManagerImpl::ActiveStream::encodeHeadersInternal(ResponseHeaderMap& headers,
                                                                 bool end_stream) {
   // Base headers.
@@ -1017,6 +1118,7 @@ void ConnectionManagerImpl::ActiveStream::encodeHeadersInternal(ResponseHeaderMa
     headers.setReferenceServer(connection_manager_.config_.serverName());
   }
   ConnectionManagerUtility::mutateResponseHeaders(headers, request_headers_.get(),
+                                                  connection_manager_.config_.requestIDExtension(),
                                                   connection_manager_.config_.via());
 
   // See if we want to drain/close the connection. Send the go away frame prior to encoding the
