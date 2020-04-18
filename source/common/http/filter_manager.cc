@@ -1,5 +1,10 @@
 #include "common/http/filter_manager.h"
 
+#include <cstdint>
+
+#include "envoy/router/router.h"
+#include "envoy/tracing/http_tracer.h"
+
 #include "common/http/utility.h"
 
 namespace Envoy {
@@ -800,12 +805,29 @@ const Network::Connection* FilterManager::ActiveStreamFilterBase::connection() {
   return parent_.connection();
 }
 
+uint64_t FilterManager::ActiveStreamFilterBase::streamId() const { return parent_.stream_id_; }
+
+Tracing::Config& FilterManager::ActiveStreamFilterBase::tracingConfig() {
+  return parent_.tracing_config_;
+}
+
+absl::optional<Router::ConfigConstSharedPtr>
+FilterManager::ActiveStreamDecoderFilter::routeConfig() {
+  return parent_.callbacks_.getRouteConfig();
+}
+
 Event::Dispatcher& FilterManager::ActiveStreamFilterBase::dispatcher() {
   return parent_.dispatcher_;
 }
 
 StreamInfo::StreamInfo& FilterManager::ActiveStreamFilterBase::streamInfo() {
   return parent_.stream_info_;
+}
+
+void FilterManager::disarmRequestTimeout() {
+  if (request_timer_) {
+    request_timer_->disableTimer();
+  }
 }
 
 Tracing::Span& FilterManager::ActiveStreamFilterBase::activeSpan() {
@@ -855,9 +877,7 @@ Router::RouteConstSharedPtr FilterManager::ActiveStreamFilterBase::route() {
 void FilterManager::ActiveStreamFilterBase::clearRouteCache() {
   parent_.cached_route_ = absl::optional<Router::RouteConstSharedPtr>();
   parent_.cached_cluster_info_ = absl::optional<Upstream::ClusterInfoConstSharedPtr>();
-  if (parent_.tracing_custom_tags_) {
-    parent_.tracing_custom_tags_->clear();
-  }
+  parent_.callbacks_.clearCustomTags();
 }
 
 Buffer::WatermarkBufferPtr FilterManager::ActiveStreamDecoderFilter::createBuffer() {
@@ -935,10 +955,6 @@ void FilterManager::ActiveStreamDecoderFilter::encodeMetadata(MetadataMapPtr&& m
 void FilterManager::ActiveStreamDecoderFilter::onDecoderFilterAboveWriteBufferHighWatermark() {
   ENVOY_STREAM_LOG(debug, "Read-disabling downstream stream due to filter callbacks.", parent_);
   parent_.callbacks_.decoderAboveWriteBufferHighWatermark();
-
-  // TODO
-  // parent_.response_encoder_->getStream().readDisable(true);
-  // parent_.connection_manager_.stats_.named_.downstream_flow_control_paused_reading_total_.inc();
 }
 
 void FilterManager::ActiveStreamDecoderFilter::requestDataTooLarge() {
@@ -946,7 +962,6 @@ void FilterManager::ActiveStreamDecoderFilter::requestDataTooLarge() {
   if (parent_.state_.decoder_filters_streaming_) {
     onDecoderFilterAboveWriteBufferHighWatermark();
   } else {
-    // parent_.connection_manager_.stats_.named_.downstream_rq_too_large_.inc(); TODO snowp
     parent_.callbacks_.requestTooLarge();
     sendLocalReply(Code::PayloadTooLarge, CodeUtility::toString(Code::PayloadTooLarge), nullptr,
                    absl::nullopt, StreamInfo::ResponseCodeDetails::get().RequestPayloadTooLarge);
@@ -962,10 +977,6 @@ void FilterManager::ActiveStreamDecoderFilter::requestDataDrained() {
 void FilterManager::ActiveStreamDecoderFilter::onDecoderFilterBelowWriteBufferLowWatermark() {
   ENVOY_STREAM_LOG(debug, "Read-enabling downstream stream due to filter callbacks.", parent_);
   parent_.callbacks_.decoderBelowWriteBufferLowWatermark();
-
-  // TODO snowp
-  // parent_.response_encoder_->getStream().readDisable(false);
-  // parent_.connection_manager_.stats_.named_.downstream_flow_control_resumed_reading_total_.inc();
 }
 
 void FilterManager::ActiveStreamDecoderFilter::addDownstreamWatermarkCallbacks(
@@ -987,18 +998,9 @@ void FilterManager::ActiveStreamDecoderFilter::removeDownstreamWatermarkCallback
 }
 
 void FilterManager::refreshCachedRoute() {
-  // TODO snowp
-  // Router::RouteConstSharedPtr route;
-  // if (request_headers_ != nullptr) {
-  //   if (connection_manager_.config_.isRoutable() &&
-  //       connection_manager_.config_.scopedRouteConfigProvider() != nullptr) {
-  //     // NOTE: re-select scope as well in case the scope key header has been changed by a filter.
-  //     snapScopedRouteConfig();
-  //   }
-  //   if (snapped_route_config_ != nullptr) {
-  //     route = snapped_route_config_->route(*request_headers_, stream_info_, stream_id_);
-  //   }
-  // }
+  if (!request_headers_) {
+    return;
+  }
   auto route = callbacks_.evaluateRoute(*request_headers_, stream_info_);
   stream_info_.route_entry_ = route ? route->routeEntry() : nullptr;
   cached_route_ = std::move(route);
@@ -1014,29 +1016,7 @@ void FilterManager::refreshCachedRoute() {
 }
 
 void FilterManager::refreshCachedTracingCustomTags() {
-  callbacks_.evaluateCustomTags(
-      [this]() -> Tracing::CustomTagMap& { return getOrMakeTracingCustomTagMap(); });
-  // if (!connection_manager_.config_.tracingConfig()) {
-  //   return;
-  // }
-  // const Tracing::CustomTagMap& conn_manager_tags =
-  //     connection_manager_.config_.tracingConfig()->custom_tags_;
-  // const Tracing::CustomTagMap* route_tags = nullptr;
-  // if (hasCachedRoute() && cached_route_.value()->tracingConfig()) {
-  //   route_tags = &cached_route_.value()->tracingConfig()->getCustomTags();
-  // }
-  // const bool configured_in_conn = !conn_manager_tags.empty();
-  // const bool configured_in_route = route_tags && !route_tags->empty();
-  // if (!configured_in_conn && !configured_in_route) {
-  //   return;
-  // }
-  // Tracing::CustomTagMap& custom_tag_map = getOrMakeTracingCustomTagMap();
-  // if (configured_in_route) {
-  //   custom_tag_map.insert(route_tags->begin(), route_tags->end());
-  // }
-  // if (configured_in_conn) {
-  //   custom_tag_map.insert(conn_manager_tags.begin(), conn_manager_tags.end());
-  // }
+  callbacks_.evaluateCustomTags(hasCachedRoute() ? cached_route_.value() : nullptr);
 }
 
 bool FilterManager::ActiveStreamDecoderFilter::recreateStream() {
@@ -1066,10 +1046,10 @@ void FilterManager::ActiveStreamDecoderFilter::requestRouteConfigUpdate(
   parent_.requestRouteConfigUpdate(dispatcher(), std::move(route_config_updated_cb));
 }
 
-absl::optional<Router::ConfigConstSharedPtr>
-FilterManager::ActiveStreamDecoderFilter::routeConfig() {
-  return parent_.routeConfig();
-}
+// absl::optional<Router::ConfigConstSharedPtr>
+// FilterManager::ActiveStreamDecoderFilter::routeConfig() {
+//   return parent_.routeConfig();
+// }
 
 Buffer::WatermarkBufferPtr FilterManager::ActiveStreamEncoderFilter::createBuffer() {
   auto buffer = new Buffer::WatermarkBuffer([this]() -> void { this->responseDataDrained(); },
@@ -1086,6 +1066,56 @@ void FilterManager::requestRouteConfigUpdate(
       absl::AsciiStrToLower(request_headers_->Host()->value().getStringView());
   route_config_update_requester_->requestRouteConfigUpdate(host_header, thread_local_dispatcher,
                                                            std::move(route_config_updated_cb));
+}
+void FilterManager::resetIdleTimer() {
+  if (stream_idle_timer_ != nullptr) {
+    // TODO(htuch): If this shows up in performance profiles, optimize by only
+    // updating a timestamp here and doing periodic checks for idle timeouts
+    // instead, or reducing the accuracy of timers.
+    stream_idle_timer_->enableTimer(idle_timeout_ms_);
+  }
+}
+
+void FilterManager::sendLocalReply(
+    bool is_grpc_request, Code code, absl::string_view body,
+    const std::function<void(ResponseHeaderMap& headers)>& modify_headers, bool is_head_request,
+    const absl::optional<Grpc::Status::GrpcStatus> grpc_status, absl::string_view details) {
+  ENVOY_STREAM_LOG(debug, "Sending local reply with details {}", *this, details);
+  ASSERT(response_headers_ == nullptr);
+  // For early error handling, do a best-effort attempt to create a filter chain
+  // to ensure access logging.
+  if (!state_.created_filter_chain_) {
+    createFilterChain();
+  }
+  stream_info_.setResponseCodeDetails(details);
+  Utility::sendLocalReply(
+      is_grpc_request,
+      [this, modify_headers](ResponseHeaderMapPtr&& headers, bool end_stream) -> void {
+        if (modify_headers != nullptr) {
+          modify_headers(*headers);
+        }
+        response_headers_ = std::move(headers);
+        // TODO: Start encoding from the last decoder filter that saw the
+        // request instead.
+        encodeHeaders(nullptr, *response_headers_, end_stream);
+      },
+      [this](Buffer::Instance& data, bool end_stream) -> void {
+        // TODO: Start encoding from the last decoder filter that saw the
+        // request instead.
+        encodeData(nullptr, data, end_stream, FilterIterationStartState::CanStartFromCurrent);
+      },
+      state_.destroyed_, code, body, grpc_status, is_head_request);
+}
+
+void FilterManager::maybeEndEncode(bool end_stream) {
+  if (end_stream) {
+    ASSERT(!state_.codec_saw_local_complete_);
+    state_.codec_saw_local_complete_ = true;
+    stream_info_.onLastDownstreamTxByteSent();
+    // request_response_timespan_->complete(); TODO
+    callbacks_.endStream();
+    // connection_manager_.doEndStream(*this); DONE
+  }
 }
 
 void FilterManager::ActiveStreamEncoderFilter::handleMetadataAfterHeadersCallback() {
@@ -1137,7 +1167,6 @@ void FilterManager::ActiveStreamEncoderFilter::responseDataTooLarge() {
     onEncoderFilterAboveWriteBufferHighWatermark();
   } else {
     parent_.callbacks_.responseDataTooLarge();
-    // parent_.connection_manager_.stats_.named_.rs_too_large_.inc(); TODO snowp
 
     // If headers have not been sent to the user, send a 500.
     if (!headers_continued_) {
@@ -1177,7 +1206,6 @@ void FilterManager::ActiveStreamEncoderFilter::responseDataTooLarge() {
 
 void FilterManager::onIdleTimeout() {
   callbacks_.onIdleTimeout();
-  // connection_manager_.stats_.named_.downstream_rq_idle_timeout_.inc(); TODO snowp
   // If headers have not been sent to the user, send a 408.
   if (response_headers_ != nullptr) {
     // TODO(htuch): We could send trailers here with an x-envoy timeout header
@@ -1194,7 +1222,6 @@ void FilterManager::onIdleTimeout() {
 
 void FilterManager::onRequestTimeout() {
   callbacks_.onRequestTimeout();
-  // connection_manager_.stats_.named_.downstream_rq_timeout_.inc(); TODO snowp
   sendLocalReply(request_headers_ != nullptr && Grpc::Common::hasGrpcContentType(*request_headers_),
                  Http::Code::RequestTimeout, "request timeout", nullptr, state_.is_head_request_,
                  absl::nullopt, StreamInfo::ResponseCodeDetails::get().RequestOverallTimeout);
@@ -1203,9 +1230,7 @@ void FilterManager::onRequestTimeout() {
 void FilterManager::onStreamMaxDurationReached() {
   ENVOY_STREAM_LOG(debug, "Stream max duration time reached", *this);
   callbacks_.onStreamMaxDurationReached();
-  // connection_manager_.stats_.named_.downstream_rq_max_duration_reached_.inc(); TODO
   callbacks_.endStream();
-  // connection_manager_.doEndStream(*this);
 }
 
 void FilterManager::callHighWatermarkCallbacks() {

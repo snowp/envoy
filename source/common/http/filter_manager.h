@@ -30,12 +30,6 @@ namespace Http {
 class FilterManagerCallbacks {
 public:
   virtual ~FilterManagerCallbacks() = default;
-  virtual void decodeFiltered100ContinueHeaders(Http::RequestHeaderMap& headers) PURE;
-  virtual void decodeFilteredHeaders(Http::RequestHeaderMap& headers, bool end_stream) PURE;
-  virtual void decodeFilteredMetadata(MetadataMapVector&& metadata) PURE;
-  virtual void decodeFilteredData(Buffer::Instance&& data, bool end_stream) PURE;
-  virtual bool decodeFilteredTrailers(Http::RequestTrailerMap& trailers) PURE;
-
   virtual void encodeFiltered100ContinueHeaders(const Http::RequestHeaderMap& request_headers,
                                                 Http::ResponseHeaderMap& response_headers) PURE;
   virtual void encodeFilteredHeaders(Http::ResponseHeaderMap& headers, bool end_stream) PURE;
@@ -64,11 +58,27 @@ public:
 
   virtual Http1StreamEncoderOptionsOptRef http1StreamEncoderOptions() PURE;
   // Returns headers if the stream creation failed, passing ownership back to the caller.
-  virtual RequestHeaderMapPtr newStream(RequestHeaderMapPtr&& request_headers);
+  virtual RequestHeaderMapPtr newStream(RequestHeaderMapPtr&& request_headers) PURE;
 
+  virtual absl::optional<Router::ConfigConstSharedPtr> getRouteConfig() PURE;
   virtual Router::RouteConstSharedPtr evaluateRoute(const Http::RequestHeaderMap& headers,
                                                     const StreamInfo::StreamInfo& stream_info) PURE;
-  virtual void evaluateCustomTags(std::function<Tracing::CustomTagMap&()> get_or_make_tag_map);
+  virtual void evaluateCustomTags(Router::RouteConstSharedPtr route) PURE;
+  virtual void clearCustomTags() PURE;
+};
+
+// Used to abstract making of RouteConfig update request.
+// RdsRouteConfigUpdateRequester is used when an RdsRouteConfigProvider is configured,
+// NullRouteConfigUpdateRequester is used in all other cases (specifically when
+// ScopedRdsConfigProvider/InlineScopedRoutesConfigProvider is configured)
+// TODO(snowp): move commment
+class RouteConfigUpdateRequester {
+public:
+  virtual ~RouteConfigUpdateRequester() = default;
+  virtual void requestRouteConfigUpdate(const std::string, Event::Dispatcher&,
+                                        Http::RouteConfigUpdatedCallbackSharedPtr) {
+    NOT_IMPLEMENTED_GCOVR_EXCL_LINE;
+  };
 };
 
 class FilterManager : public Logger::Loggable<Logger::Id::http>,
@@ -77,12 +87,14 @@ class FilterManager : public Logger::Loggable<Logger::Id::http>,
 public:
   FilterManager(Event::Dispatcher& dispatcher, TimeSource& time_source, Protocol protocol,
                 FilterChainFactory& filter_chain_factory, Upstream::ClusterManager& cluster_manager,
-                const Tracing::Config& tracing_config, FilterManagerCallbacks& callbacks,
-                bool proxy_100_continue)
+                Tracing::Config& tracing_config, FilterManagerCallbacks& callbacks,
+                bool proxy_100_continue,
+                std::unique_ptr<RouteConfigUpdateRequester> route_config_update_requester)
       : stream_info_(protocol, time_source), dispatcher_(dispatcher),
         filter_chain_factory_(filter_chain_factory), cluster_manager_(cluster_manager),
         tracing_config_(tracing_config), callbacks_(callbacks),
-        proxy_100_continue_(proxy_100_continue) {}
+        proxy_100_continue_(proxy_100_continue),
+        route_config_update_requester_(std::move(route_config_update_requester)) {}
 
   ~FilterManager() {
     stream_info_.onRequestComplete();
@@ -218,6 +230,7 @@ private:
     StreamInfo::StreamInfo& streamInfo() override;
     Tracing::Span& activeSpan() override;
     Tracing::Config& tracingConfig() override;
+
     const ScopeTrackedObject& scope() override { return parent_; }
     void clearRouteCache() override;
 
@@ -458,7 +471,6 @@ private:
       // TODO(mattklein123): At some point we might want to actually wrap this interface but for now
       // we give the filter direct access to the encoder options.
       return parent_.callbacks_.http1StreamEncoderOptions();
-      // return parent_.response_encoder_->http1StreamEncoderOptions(); TODO
     }
 
     void responseDataTooLarge();
@@ -494,9 +506,8 @@ private:
   struct State {
     State()
         : remote_complete_(false), local_complete_(false), codec_saw_local_complete_(false),
-          successful_upgrade_(false), created_filter_chain_(false), is_internally_created_(false),
-          has_continue_headers_(false), is_head_request_(false), decoding_headers_only_(false),
-          encoding_headers_only_(false) {}
+          successful_upgrade_(false), created_filter_chain_(false), has_continue_headers_(false),
+          is_head_request_(false), decoding_headers_only_(false), encoding_headers_only_(false) {}
 
     uint32_t filter_call_state_{0};
     // The following 3 members are booleans rather than part of the space-saving bitfield as they
@@ -513,10 +524,6 @@ private:
                                         // the way through to the codec.
     bool successful_upgrade_ : 1;
     bool created_filter_chain_ : 1;
-
-    // True if this stream is internally created. Currently only used for
-    // internal redirects or other streams created via recreateStream().
-    bool is_internally_created_ : 1;
 
     // By default, we will assume there are no 100-Continue headers. If encode100ContinueHeaders
     // is ever called, this is set to true so commonContinue resumes processing the 100-Continue.
@@ -538,6 +545,20 @@ private:
   enum class FilterIterationStartState { AlwaysStartFromNext, CanStartFromCurrent };
 
 public:
+  void streamIdleTimeout(std::chrono::milliseconds idle_timeout) {
+    idle_timeout_ms_ = idle_timeout;
+    stream_idle_timer_ = dispatcher_.createTimer([this]() -> void { onIdleTimeout(); });
+    resetIdleTimer();
+  }
+  void requestTimeout(std::chrono::milliseconds request_timeout) {
+    request_timer_ = dispatcher_.createTimer([this]() -> void { onRequestTimeout(); });
+    request_timer_->enableTimer(request_timeout, this);
+  }
+  void maxStreamDuration(std::chrono::milliseconds max_stream_duration) {
+    max_stream_duration_timer_ =
+        dispatcher_.createTimer([this]() -> void { onStreamMaxDurationReached(); });
+    max_stream_duration_timer_->enableTimer(max_stream_duration, this);
+  }
   void doDeferredDestroy() {
     if (max_stream_duration_timer_) {
       max_stream_duration_timer_->disableTimer();
@@ -586,9 +607,16 @@ public:
   bool handleDataIfStopAll(ActiveStreamFilterBase& filter, Buffer::Instance& data,
                            bool& filter_streaming);
 
+  void decodeHeaders(RequestHeaderMapPtr&& headers, bool end_stream) {
+    request_headers_ = std::move(headers);
+    decodeHeaders(nullptr, *request_headers_, end_stream);
+  }
   // Sends data through decoding filter chains. filter_iteration_start_state indicates which
   // filter to start the iteration with.
+private:
   void decodeHeaders(ActiveStreamDecoderFilter* filter, RequestHeaderMap& headers, bool end_stream);
+
+public:
   void decodeData(ActiveStreamDecoderFilter* filter, Buffer::Instance& data, bool end_stream,
                   FilterIterationStartState filter_iteration_start_state);
   RequestTrailerMap& addDecodedTrailers();
@@ -622,7 +650,7 @@ public:
   void maybeEndEncode(bool end_stream);
 
   uint64_t streamId() { return stream_id_; }
-  const Network::Connection* connection();
+  const Network::Connection* connection() { return nullptr; }
   // Returns true if new metadata is decoded. Otherwise, returns false.
   bool processNewlyAddedMetadata();
   MetadataMapVector* getRequestMetadataMapVector() {
@@ -630,13 +658,6 @@ public:
       request_metadata_map_vector_ = std::make_unique<MetadataMapVector>();
     }
     return request_metadata_map_vector_.get();
-  }
-
-  Tracing::CustomTagMap& getOrMakeTracingCustomTagMap() {
-    if (tracing_custom_tags_ == nullptr) {
-      tracing_custom_tags_ = std::make_unique<Tracing::CustomTagMap>();
-    }
-    return *tracing_custom_tags_;
   }
 
   // Per-stream idle timeout callback.
@@ -665,55 +686,61 @@ public:
   absl::optional<Router::ConfigConstSharedPtr> routeConfig();
 
 public:
-  // Used to abstract making of RouteConfig update request.
-  // RdsRouteConfigUpdateRequester is used when an RdsRouteConfigProvider is configured,
-  // NullRouteConfigUpdateRequester is used in all other cases (specifically when
-  // ScopedRdsConfigProvider/InlineScopedRoutesConfigProvider is configured)
-  class RouteConfigUpdateRequester {
-  public:
-    virtual ~RouteConfigUpdateRequester() = default;
-    virtual void requestRouteConfigUpdate(const std::string, Event::Dispatcher&,
-                                          Http::RouteConfigUpdatedCallbackSharedPtr) {
-      NOT_IMPLEMENTED_GCOVR_EXCL_LINE;
-    };
-  };
-
 private:
   ResponseHeaderMapPtr continue_headers_;
   ResponseHeaderMapPtr response_headers_;
   Buffer::WatermarkBufferPtr buffered_response_data_;
   ResponseTrailerMapPtr response_trailers_{};
+  std::chrono::milliseconds idle_timeout_ms_{};
+
+public:
   RequestHeaderMapPtr request_headers_;
+
+private:
   Buffer::WatermarkBufferPtr buffered_request_data_;
   RequestTrailerMapPtr request_trailers_;
   uint32_t buffer_limit_{0};
-  Network::Socket::OptionsSharedPtr upstream_options_;
+  Network::Socket::OptionsSharedPtr upstream_options_ =
+      std::make_shared<Network::Socket::Options>();
   // Stores metadata added in the decoding filter that is being processed. Will be cleared before
   // processing the next filter. The storage is created on demand. We need to store metadata
   // temporarily in the filter in case the filter has stopped all while processing headers.
   std::unique_ptr<MetadataMapVector> request_metadata_map_vector_{nullptr};
+
+public: // TODO figure out
   absl::optional<Router::RouteConstSharedPtr> cached_route_;
-  Router::ConfigConstSharedPtr snapped_route_config_;
-  Router::ScopedConfigConstSharedPtr snapped_scoped_routes_config_;
+
+private:
   absl::optional<Upstream::ClusterInfoConstSharedPtr> cached_cluster_info_;
 
   uint64_t stream_id_;
   StreamInfo::StreamInfoImpl stream_info_;
+
+public:
   Tracing::SpanPtr active_span_;
+
+private:
   Event::Dispatcher& dispatcher_;
   FilterChainFactory& filter_chain_factory_;
   Upstream::ClusterManager& cluster_manager_;
-  const Tracing::Config& tracing_config_;
+  Tracing::Config& tracing_config_;
   FilterManagerCallbacks& callbacks_;
   const bool proxy_100_continue_;
   std::list<ActiveStreamDecoderFilterPtr> decoder_filters_;
   std::list<ActiveStreamEncoderFilterPtr> encoder_filters_;
   std::list<AccessLog::InstanceSharedPtr> access_log_handlers_;
+
+public:
   State state_;
-  std::unique_ptr<Tracing::CustomTagMap> tracing_custom_tags_{nullptr};
+
+private:
   std::list<DownstreamWatermarkCallbacks*> watermark_callbacks_{};
   std::unique_ptr<RouteConfigUpdateRequester> route_config_update_requester_;
+
+public: // TODO(snowp) accessor
   uint32_t high_watermark_count_{0};
+
+private:
   // Per-stream idle timeout.
   Event::TimerPtr stream_idle_timer_;
   // Per-stream request timeout.

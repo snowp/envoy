@@ -16,10 +16,12 @@
 #include "envoy/http/codes.h"
 #include "envoy/http/context.h"
 #include "envoy/http/filter.h"
+#include "envoy/http/header_map.h"
 #include "envoy/network/connection.h"
 #include "envoy/network/drain_decision.h"
 #include "envoy/network/filter.h"
 #include "envoy/router/rds.h"
+#include "envoy/router/router.h"
 #include "envoy/router/scopes.h"
 #include "envoy/runtime/runtime.h"
 #include "envoy/server/overload_manager.h"
@@ -88,8 +90,7 @@ public:
   void onGoAway() override;
 
   // Http::ServerConnectionCallbacks
-  RequestDecoder& newStream(ResponseEncoder& response_encoder,
-                            bool is_internally_created = false) override;
+  RequestDecoder& newStream(ResponseEncoder& response_encoder, bool is_internally_created = false);
 
   // Network::ConnectionCallbacks
   void onEvent(Network::ConnectionEvent event) override;
@@ -109,7 +110,7 @@ public:
 private:
   struct ActiveStream;
 
-  class RdsRouteConfigUpdateRequester : public FilterManager::RouteConfigUpdateRequester {
+  class RdsRouteConfigUpdateRequester : public RouteConfigUpdateRequester {
   public:
     RdsRouteConfigUpdateRequester(Router::RouteConfigProvider* route_config_provider)
         : route_config_provider_(route_config_provider) {}
@@ -121,11 +122,13 @@ private:
     Router::RouteConfigProvider* route_config_provider_;
   };
 
-  class NullRouteConfigUpdateRequester : public FilterManager::RouteConfigUpdateRequester {
+  class NullRouteConfigUpdateRequester : public RouteConfigUpdateRequester {
   public:
     NullRouteConfigUpdateRequester() = default;
   };
 
+  static std::unique_ptr<RouteConfigUpdateRequester>
+  routeConfigUpdateRequester(ConnectionManagerConfig& config);
   /**
    * Wraps a single active stream on the connection. These are either full request/response pairs
    * or pushes.
@@ -134,7 +137,6 @@ private:
                         public Event::DeferredDeletable,
                         public StreamCallbacks,
                         public RequestDecoder,
-                        public FilterChainFactoryCallbacks,
                         public FilterManagerCallbacks,
                         public Tracing::Config {
     ActiveStream(ConnectionManagerImpl& connection_manager);
@@ -184,8 +186,82 @@ private:
       connection_manager_.stats_.named_.downstream_rq_tx_reset_.inc();
       connection_manager_.doEndStream(*this);
     }
+    void resetStream() override {
+      // TODO
+    }
+    void requestTooLarge() override {
+      connection_manager_.stats_.named_.downstream_rq_too_large_.inc();
+    }
+    void responseDataTooLarge() override { connection_manager_.stats_.named_.rs_too_large_.inc(); }
+    void decoderAboveWriteBufferHighWatermark() override {
+      response_encoder_->getStream().readDisable(true);
+      connection_manager_.stats_.named_.downstream_flow_control_paused_reading_total_.inc();
+    }
+    void decoderBelowWriteBufferLowWatermark() override {
+      response_encoder_->getStream().readDisable(false);
+      connection_manager_.stats_.named_.downstream_flow_control_resumed_reading_total_.inc();
+    }
+    void onIdleTimeout() override {
+      connection_manager_.stats_.named_.downstream_rq_idle_timeout_.inc();
+    }
+    void onRequestTimeout() override {
+      connection_manager_.stats_.named_.downstream_rq_timeout_.inc();
+    }
+    void onStreamMaxDurationReached() override {
+      connection_manager_.stats_.named_.downstream_rq_max_duration_reached_.inc();
+    }
+    Router::RouteConstSharedPtr evaluateRoute(const Http::RequestHeaderMap& headers,
+                                              const StreamInfo::StreamInfo& stream_info) override {
+      Router::RouteConstSharedPtr route;
+      if (connection_manager_.config_.isRoutable() &&
+          connection_manager_.config_.scopedRouteConfigProvider() != nullptr) {
+        // NOTE: re-select scope as well in case the scope key header has been changed by a filter.
+        snapScopedRouteConfig(headers);
+      }
+      if (snapped_route_config_ != nullptr) {
+        return snapped_route_config_->route(headers, stream_info, stream_id_);
+      }
+
+      return nullptr;
+    }
+
+    void evaluateCustomTags(Router::RouteConstSharedPtr route) override {
+      if (!connection_manager_.config_.tracingConfig()) {
+        return;
+      }
+      const Tracing::CustomTagMap& conn_manager_tags =
+          connection_manager_.config_.tracingConfig()->custom_tags_;
+      const Tracing::CustomTagMap* route_tags = nullptr;
+      if (route && route->tracingConfig()) {
+        route_tags = &route->tracingConfig()->getCustomTags();
+      }
+      const bool configured_in_conn = !conn_manager_tags.empty();
+      const bool configured_in_route = route_tags && !route_tags->empty();
+      if (!configured_in_conn && !configured_in_route) {
+        return;
+      }
+      Tracing::CustomTagMap& custom_tag_map = getOrMakeTracingCustomTagMap();
+      if (configured_in_route) {
+        custom_tag_map.insert(route_tags->begin(), route_tags->end());
+      }
+      if (configured_in_conn) {
+        custom_tag_map.insert(conn_manager_tags.begin(), conn_manager_tags.end());
+      }
+    }
+    void clearCustomTags() override {
+      if (tracing_custom_tags_) {
+        tracing_custom_tags_->clear();
+      }
+    }
 
     void endStream() override { connection_manager_.doEndStream(*this); }
+
+    Tracing::CustomTagMap& getOrMakeTracingCustomTagMap() {
+      if (tracing_custom_tags_ == nullptr) {
+        tracing_custom_tags_ = std::make_unique<Tracing::CustomTagMap>();
+      }
+      return *tracing_custom_tags_;
+    }
 
     RequestHeaderMapPtr newStream(RequestHeaderMapPtr&& request_headers) override {
       // n.b. we do not currently change the codecs to point at the new stream
@@ -213,6 +289,9 @@ private:
       new_stream.decodeHeaders(std::move(request_headers), true);
       return nullptr;
     }
+    Http1StreamEncoderOptionsOptRef http1StreamEncoderOptions() override {
+      return response_encoder_->http1StreamEncoderOptions();
+    }
 
     // Http::StreamCallbacks
     void onResetStream(StreamResetReason reason,
@@ -234,15 +313,16 @@ private:
     bool verbose() const override;
     uint32_t maxPathTagLength() const override;
 
-    void traceRequest();
+    Tracing::SpanPtr traceRequest(RequestHeaderMap& request_headers);
 
+    Router::ConfigConstSharedPtr scopedRouteConfig(const RequestHeaderMap& request_headers);
+    absl::optional<Router::ConfigConstSharedPtr> getRouteConfig() override;
     // Updates the snapped_route_config_ (by reselecting scoped route configuration), if a scope is
     // not found, snapped_route_config_ is set to Router::NullConfigImpl.
-    void snapScopedRouteConfig();
+    void snapScopedRouteConfig(const RequestHeaderMap& request_headers);
     void
     requestRouteConfigUpdate(Event::Dispatcher& thread_local_dispatcher,
                              Http::RouteConfigUpdatedCallbackSharedPtr route_config_updated_cb);
-    absl::optional<Router::ConfigConstSharedPtr> routeConfig();
 
     friend std::ostream& operator<<(std::ostream& os, const ActiveStream& s) {
       s.filter_manager_.dumpState(os);
@@ -254,9 +334,15 @@ private:
     FilterManager filter_manager_;
     ResponseEncoder* response_encoder_{};
     Stats::TimespanPtr request_response_timespan_;
-    std::chrono::milliseconds idle_timeout_ms_{};
+    Router::ConfigConstSharedPtr snapped_route_config_;
+    Router::ScopedConfigConstSharedPtr snapped_scoped_routes_config_;
+    std::unique_ptr<Tracing::CustomTagMap> tracing_custom_tags_{nullptr};
     StreamInfo::StreamInfoImpl stream_info_;
     const std::string* decorated_operation_{nullptr};
+
+    // True if this stream is internally created. Currently only used for
+    // internal redirects or other streams created via recreateStream().
+    bool is_internally_created_ : 1;
     bool saw_connection_close_ : 1;
     bool decorated_propagate_ : 1;
   };
