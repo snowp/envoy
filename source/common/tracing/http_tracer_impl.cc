@@ -154,12 +154,14 @@ void HttpTracerUtility::finalizeDownstreamSpan(Span& span,
                                                const Http::ResponseTrailerMap* response_trailers,
                                                const StreamInfo::StreamInfo& stream_info,
                                                const Config& tracing_config) {
+  std::cout << "CALLING FINALIZE" << std::endl;
   // Pre response data.
   if (request_headers) {
     if (request_headers->RequestId()) {
       span.setTag(Tracing::Tags::get().GuidXRequestId,
                   std::string(request_headers->RequestId()->value().getStringView()));
     }
+    std::cout << "IN REQ HEADESR" << std::endl;
     span.setTag(Tracing::Tags::get().HttpUrl,
                 buildUrl(*request_headers, tracing_config.maxPathTagLength()));
     span.setTag(Tracing::Tags::get().HttpMethod,

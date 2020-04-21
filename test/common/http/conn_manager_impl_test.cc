@@ -428,6 +428,7 @@ TEST_F(HttpConnectionManagerImplTest, HeaderOnlyRequestAndResponse) {
   EXPECT_CALL(*filter, decodeHeaders(_, true))
       .Times(2)
       .WillRepeatedly(Invoke([&](RequestHeaderMap& headers, bool) -> FilterHeadersStatus {
+        std::cout << "INVOKING  FILTER" << std::endl;
         EXPECT_NE(nullptr, headers.ForwardedFor());
         EXPECT_EQ("http", headers.ForwardedProto()->value().getStringView());
         if (headers.Path()->value() == "/healthcheck") {
@@ -442,6 +443,7 @@ TEST_F(HttpConnectionManagerImplTest, HeaderOnlyRequestAndResponse) {
   EXPECT_CALL(filter_factory_, createFilterChain(_))
       .Times(2)
       .WillRepeatedly(Invoke([&](FilterChainFactoryCallbacks& callbacks) -> void {
+        std::cout << "ADDING  FILTER" << std::endl;
         callbacks.addStreamDecoderFilter(filter);
       }));
 
@@ -691,6 +693,7 @@ TEST_F(HttpConnectionManagerImplTest, InvalidPathWithDualFilter) {
   auto* filter = new MockStreamFilter();
   EXPECT_CALL(filter_factory_, createFilterChain(_))
       .WillOnce(Invoke([&](FilterChainFactoryCallbacks& callbacks) -> void {
+        std::cout << "CALLING FILTER CHAIN" << std::endl;
         callbacks.addStreamFilter(StreamFilterSharedPtr{filter});
       }));
   EXPECT_CALL(*filter, setDecoderFilterCallbacks(_));
@@ -825,6 +828,7 @@ TEST_F(HttpConnectionManagerImplTest, StartAndFinishSpanNormalFlow) {
   setup(false, "");
 
   auto* span = new NiceMock<Tracing::MockSpan>();
+  std::cout << "SPAN ADDR " << span << std::endl;
   EXPECT_CALL(*tracer_, startSpan_(_, _, _, _))
       .WillOnce(
           Invoke([&](const Tracing::Config& config, const HeaderMap&, const StreamInfo::StreamInfo&,

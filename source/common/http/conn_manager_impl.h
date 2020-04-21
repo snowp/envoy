@@ -278,11 +278,11 @@ private:
       // We don't need to copy over the old parent FilterState from the old StreamInfo if it did not
       // store any objects with a LifeSpan at or above DownstreamRequest. This is to avoid
       // unnecessary heap allocation.
-      if (stream_info_.filter_state_->hasDataAtOrAboveLifeSpan(
+      if (filter_manager_.stream_info_.filter_state_->hasDataAtOrAboveLifeSpan(
               StreamInfo::FilterState::LifeSpan::DownstreamRequest)) {
-        (*connection_manager_.streams_.begin())->stream_info_.filter_state_ =
+        (*connection_manager_.streams_.begin())->filter_manager_.stream_info_.filter_state_ =
             std::make_shared<StreamInfo::FilterStateImpl>(
-                stream_info_.filter_state_->parent(),
+                filter_manager_.stream_info_.filter_state_->parent(),
                 StreamInfo::FilterState::LifeSpan::FilterChain);
       }
 
@@ -337,7 +337,7 @@ private:
     Router::ConfigConstSharedPtr snapped_route_config_;
     Router::ScopedConfigConstSharedPtr snapped_scoped_routes_config_;
     std::unique_ptr<Tracing::CustomTagMap> tracing_custom_tags_{nullptr};
-    StreamInfo::StreamInfoImpl stream_info_;
+    // StreamInfo::StreamInfoImpl stream_info_;
     const std::string* decorated_operation_{nullptr};
 
     // True if this stream is internally created. Currently only used for

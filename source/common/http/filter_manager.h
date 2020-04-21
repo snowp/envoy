@@ -88,9 +88,9 @@ public:
   FilterManager(Event::Dispatcher& dispatcher, TimeSource& time_source, Protocol protocol,
                 FilterChainFactory& filter_chain_factory, Upstream::ClusterManager& cluster_manager,
                 Tracing::Config& tracing_config, FilterManagerCallbacks& callbacks,
-                bool proxy_100_continue,
+                bool proxy_100_continue, StreamInfo::FilterStateSharedPtr parent_filter_state,
                 std::unique_ptr<RouteConfigUpdateRequester> route_config_update_requester)
-      : stream_info_(protocol, time_source), dispatcher_(dispatcher),
+      : stream_info_(protocol, time_source, parent_filter_state), dispatcher_(dispatcher),
         filter_chain_factory_(filter_chain_factory), cluster_manager_(cluster_manager),
         tracing_config_(tracing_config), callbacks_(callbacks),
         proxy_100_continue_(proxy_100_continue),
@@ -109,6 +109,10 @@ public:
       log_handler->log(request_headers_.get(), response_headers_.get(), response_trailers_.get(),
                        stream_info_);
     }
+    std::cout << "FINALIZING, as: " << active_span_.get() << std::endl;
+    std::cout << "HEADERS: " << request_headers_.get() << std::endl;
+    std::cout << "RHEADERS: " << response_headers_.get() << std::endl;
+    std::cout << "TRAILERS: " << response_trailers_.get() << std::endl;
     if (active_span_) {
       Tracing::HttpTracerUtility::finalizeDownstreamSpan(
           *active_span_, request_headers_.get(), response_headers_.get(), response_trailers_.get(),
@@ -144,8 +148,8 @@ public:
     addStreamEncoderFilter(filter, false);
   }
   void addStreamFilter(StreamFilterSharedPtr filter) override {
-    addStreamEncoderFilter(filter, true);
     addStreamDecoderFilter(filter, true);
+    addStreamEncoderFilter(filter, true);
   }
   void addAccessLogHandler(AccessLog::InstanceSharedPtr handler) {
     access_log_handlers_.push_back(handler);
@@ -714,8 +718,11 @@ private:
   absl::optional<Upstream::ClusterInfoConstSharedPtr> cached_cluster_info_;
 
   uint64_t stream_id_;
+
+public:
   StreamInfo::StreamInfoImpl stream_info_;
 
+private:
 public:
   Tracing::SpanPtr active_span_;
 
