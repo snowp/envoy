@@ -156,6 +156,8 @@ void ConnectionManagerImpl::initializeReadFilterCallbacks(Network::ReadFilterCal
       {stats_.named_.downstream_cx_rx_bytes_total_, stats_.named_.downstream_cx_rx_bytes_buffered_,
        stats_.named_.downstream_cx_tx_bytes_total_, stats_.named_.downstream_cx_tx_bytes_buffered_,
        nullptr, &stats_.named_.downstream_cx_delayed_close_timeout_});
+
+  filter_state_ = read_callbacks_->connection().streamInfo().filterState();
 }
 
 ConnectionManagerImpl::~ConnectionManagerImpl() {
