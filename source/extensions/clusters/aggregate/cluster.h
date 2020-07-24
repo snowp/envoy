@@ -1,12 +1,16 @@
 #pragma once
 
 #include "envoy/config/cluster/v3/cluster.pb.h"
+#include "envoy/event/dispatcher.h"
 #include "envoy/extensions/clusters/aggregate/v3/cluster.pb.h"
 #include "envoy/extensions/clusters/aggregate/v3/cluster.pb.validate.h"
 
 #include "common/upstream/cluster_factory_impl.h"
 #include "common/upstream/upstream_impl.h"
+#include "common/init/target_impl.h"
 
+#include "envoy/thread_local/thread_local.h"
+#include "envoy/upstream/thread_local_cluster.h"
 #include "extensions/clusters/aggregate/lb_context.h"
 
 namespace Envoy {
@@ -54,6 +58,7 @@ public:
   Upstream::ClusterManager& cluster_manager_;
   Runtime::Loader& runtime_;
   Random::RandomGenerator& random_;
+  Event::Dispatcher& dispatcher_;
   ThreadLocal::SlotPtr tls_;
   const std::vector<std::string> clusters_;
 
@@ -64,6 +69,16 @@ private:
   void refresh(const std::function<bool(const std::string&)>& skip_predicate);
   PriorityContextPtr
   linearizePrioritySet(const std::function<bool(const std::string&)>& skip_predicate);
+
+  class InitialLbConfiguration : public ThreadLocal::ThreadLocalObject {
+    public:
+      bool initialized() { return initialized_; }
+
+      void initialize() { initialized_ = true; }
+
+    private:
+      bool initialized_{};
+  };
 };
 
 // Load balancer used by each worker thread. It will be refreshed when clusters, hosts or priorities
@@ -120,6 +135,7 @@ public:
                                                           random_, common_config_);
     } else {
       load_balancer_ = nullptr;
+      std::cout << "RESETTING LB" << std::endl;
     }
     priority_context_ = std::move(priority_context);
   }

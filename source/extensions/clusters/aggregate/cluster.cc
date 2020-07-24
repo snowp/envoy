@@ -1,10 +1,14 @@
 #include "extensions/clusters/aggregate/cluster.h"
 
+#include "common/init/target_impl.h"
 #include "envoy/config/cluster/v3/cluster.pb.h"
+#include "envoy/event/dispatcher.h"
 #include "envoy/extensions/clusters/aggregate/v3/cluster.pb.h"
 #include "envoy/extensions/clusters/aggregate/v3/cluster.pb.validate.h"
 
 #include "common/common/assert.h"
+#include "envoy/thread_local/thread_local.h"
+#include "envoy/upstream/thread_local_cluster.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -20,7 +24,8 @@ Cluster::Cluster(const envoy::config::cluster::v3::Cluster& cluster,
     : Upstream::ClusterImplBase(cluster, runtime, factory_context, std::move(stats_scope),
                                 added_via_api),
       cluster_manager_(cluster_manager), runtime_(runtime), random_(random),
-      tls_(tls.allocateSlot()), clusters_(config.clusters().begin(), config.clusters().end()) {}
+      dispatcher_(factory_context.dispatcher()), tls_(tls.allocateSlot()),
+      clusters_(config.clusters().begin(), config.clusters().end()) {}
 
 PriorityContextPtr
 Cluster::linearizePrioritySet(const std::function<bool(const std::string&)>& skip_predicate) {
@@ -82,30 +87,51 @@ void Cluster::startPreInit() {
           refresh();
         });
   }
-  refresh();
+
   handle_ = cluster_manager_.addThreadLocalClusterUpdateCallbacks(*this);
+
+  // The intitial load requires a bit different refresh logic than regular updates:
+  // in order to make sure that we have allocated the TLS cluster by the time the refresh
+  // is attempted, we pass along the initial computation so that it can be used in
+  // addOrUpdateCluster immediately following the creation of the TLS cluster. This
+  // ensures that there is no way for traffic to be routed to a TLS cluster before the 
+  // load balaner has been initialized with the LB priorities.
+  tls_->set([](Event::Dispatcher&) -> ThreadLocal::ThreadLocalObjectSharedPtr {
+    return std::make_shared<InitialLbConfiguration>();
+  });
 
   onPreInitComplete();
 }
 
 void Cluster::refresh(const std::function<bool(const std::string&)>& skip_predicate) {
-  // Post the priority set to worker threads.
-  tls_->runOnAllThreads([this, skip_predicate, cluster_name = this->info()->name()]() {
-    PriorityContextPtr priority_context = linearizePrioritySet(skip_predicate);
-    Upstream::ThreadLocalCluster* cluster = cluster_manager_.get(cluster_name);
-    ASSERT(cluster != nullptr);
-    dynamic_cast<AggregateClusterLoadBalancer&>(cluster->loadBalancer())
-        .refresh(std::move(priority_context));
-  });
+  PriorityContextPtr priority_context = linearizePrioritySet(skip_predicate);
+  Upstream::ThreadLocalCluster* cluster = cluster_manager_.get(info()->name());
+  ASSERT(cluster != nullptr);
+  std::cout << "SETTING PC: " << std::endl;
+  for (const auto& kv : priority_context->cluster_and_priority_to_linearized_priority_) {
+    std::cout << kv.first.first << " " << kv.first.second << " " << kv.second << std::endl;
+  }
+  std::cout << priority_context->priority_set_.hostSetsPerPriority().size() << std::endl;
+  dynamic_cast<AggregateClusterLoadBalancer&>(cluster->loadBalancer())
+      .refresh(std::move(priority_context));
 }
 
 void Cluster::onClusterAddOrUpdate(Upstream::ThreadLocalCluster& cluster) {
+  auto& lb_configuration = tls_->getTyped<InitialLbConfiguration>();
+  if (!lb_configuration.initialized() && cluster.info()->name() == info()->name()) {
+    refresh();
+
+    lb_configuration.initialize();
+  }
+  
   if (std::find(clusters_.begin(), clusters_.end(), cluster.info()->name()) != clusters_.end()) {
     ENVOY_LOG(debug, "adding or updating cluster '{}' for aggregate cluster '{}'",
               cluster.info()->name(), info()->name());
     refresh();
     cluster.prioritySet().addMemberUpdateCb(
         [this](const Upstream::HostVector&, const Upstream::HostVector&) { refresh(); });
+
+    lb_configuration.initialize();
   }
 }
 
@@ -154,6 +180,7 @@ AggregateClusterLoadBalancer::LoadBalancerImpl::chooseHost(Upstream::LoadBalance
 
   Upstream::ThreadLocalCluster* cluster =
       priority_context_.priority_to_cluster_[priority_pair.first].second;
+  std::cout << "SELECTED CLUSTER: " << cluster->info()->name() << std::endl;
   return cluster->loadBalancer().chooseHost(&aggregate_context);
 }
 
@@ -162,6 +189,7 @@ AggregateClusterLoadBalancer::chooseHost(Upstream::LoadBalancerContext* context)
   if (load_balancer_) {
     return load_balancer_->chooseHost(context);
   }
+  std::cout << "NO LB" << std::endl;
   return nullptr;
 }
 
