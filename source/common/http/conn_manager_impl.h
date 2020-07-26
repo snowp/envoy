@@ -387,9 +387,30 @@ private:
     NullRouteConfigUpdateRequester() = default;
   };
 
-  class FilterManager {
+  class FilterManager  :
+                        public FilterChainFactoryCallbacks {
   public:
-    explicit FilterManager(ActiveStream& parent) : parent_(parent) {}
+    FilterManager(ActiveStream& parent, FilterChainFactory& filter_chain_factory)
+        : parent_(parent), filter_chain_factory_(filter_chain_factory) {}
+
+    ~FilterManager();
+
+    // Http::FilterChainFactoryCallbacks
+    void addStreamDecoderFilter(StreamDecoderFilterSharedPtr filter) override {
+      addStreamDecoderFilterWorker(filter, false);
+    }
+    void addStreamEncoderFilter(StreamEncoderFilterSharedPtr filter) override {
+      addStreamEncoderFilterWorker(filter, false);
+    }
+    void addStreamFilter(StreamFilterSharedPtr filter) override {
+      addStreamDecoderFilterWorker(filter, true);
+      addStreamEncoderFilterWorker(filter, true);
+    }
+    void addAccessLogHandler(AccessLog::InstanceSharedPtr handler) override;
+
+    // Set up the Encoder/Decoder filter chain.
+    bool createFilterChain();
+
     void destroyFilters() {
       for (auto& filter : decoder_filters_) {
         filter->handle_->onDestroy();
@@ -404,9 +425,6 @@ private:
     }
     // Indicates which filter to start the iteration with.
     enum class FilterIterationStartState { AlwaysStartFromNext, CanStartFromCurrent };
-
-    void addStreamDecoderFilterWorker(StreamDecoderFilterSharedPtr filter, bool dual_filter);
-    void addStreamEncoderFilterWorker(StreamEncoderFilterSharedPtr filter, bool dual_filter);
 
     // Returns the encoder filter to start iteration with.
     std::list<ActiveStreamEncoderFilterPtr>::iterator
@@ -472,7 +490,19 @@ private:
 
     ActiveStream& parent_;
 
+    // TODO(snowp): Make these private by 1) implementing ScopeTrackedObject for FM and 2) exposing accessors.
+    ResponseHeaderMapPtr continue_headers_;
+    ResponseHeaderMapPtr response_headers_;
+    ResponseTrailerMapPtr response_trailers_;
+    RequestHeaderMapPtr request_headers_;
+    RequestTrailerMapPtr request_trailers_;
+
   private:
+    void addStreamDecoderFilterWorker(StreamDecoderFilterSharedPtr filter, bool dual_filter);
+    void addStreamEncoderFilterWorker(StreamEncoderFilterSharedPtr filter, bool dual_filter);
+
+    FilterChainFactory& filter_chain_factory_;
+    std::list<AccessLog::InstanceSharedPtr> access_log_handlers_;
     std::list<ActiveStreamDecoderFilterPtr> decoder_filters_;
     std::list<ActiveStreamEncoderFilterPtr> encoder_filters_;
   };
@@ -485,7 +515,6 @@ private:
                         public Event::DeferredDeletable,
                         public StreamCallbacks,
                         public RequestDecoder,
-                        public FilterChainFactoryCallbacks,
                         public Tracing::Config,
                         public ScopeTrackedObject {
     ActiveStream(ConnectionManagerImpl& connection_manager);
@@ -524,19 +553,6 @@ private:
     void decodeHeaders(RequestHeaderMapPtr&& headers, bool end_stream) override;
     void decodeTrailers(RequestTrailerMapPtr&& trailers) override;
 
-    // Http::FilterChainFactoryCallbacks
-    void addStreamDecoderFilter(StreamDecoderFilterSharedPtr filter) override {
-      filter_manager_.addStreamDecoderFilterWorker(filter, false);
-    }
-    void addStreamEncoderFilter(StreamEncoderFilterSharedPtr filter) override {
-      filter_manager_.addStreamEncoderFilterWorker(filter, false);
-    }
-    void addStreamFilter(StreamFilterSharedPtr filter) override {
-      filter_manager_.addStreamDecoderFilterWorker(filter, true);
-      filter_manager_.addStreamEncoderFilterWorker(filter, true);
-    }
-    void addAccessLogHandler(AccessLog::InstanceSharedPtr handler) override;
-
     // Tracing::TracingConfig
     Tracing::OperationName operationName() const override;
     const Tracing::CustomTagMap* customTags() const override;
@@ -551,10 +567,10 @@ private:
          << DUMP_MEMBER(state_.decoding_headers_only_) << DUMP_MEMBER(state_.encoding_headers_only_)
          << "\n";
 
-      DUMP_DETAILS(request_headers_);
-      DUMP_DETAILS(request_trailers_);
-      DUMP_DETAILS(response_headers_);
-      DUMP_DETAILS(response_trailers_);
+      DUMP_DETAILS(filter_manager_.request_headers_);
+      DUMP_DETAILS(filter_manager_.request_trailers_);
+      DUMP_DETAILS(filter_manager_.response_headers_);
+      DUMP_DETAILS(filter_manager_.response_trailers_);
       DUMP_DETAILS(&stream_info_);
     }
 
@@ -650,8 +666,6 @@ private:
 
     // Possibly increases buffer_limit_ to the value of limit.
     void setBufferLimit(uint32_t limit);
-    // Set up the Encoder/Decoder filter chain.
-    bool createFilterChain();
     // Per-stream idle timeout callback.
     void onIdleTimeout();
     // Reset per-stream idle timer.
@@ -685,20 +699,13 @@ private:
     }
 
     ConnectionManagerImpl& connection_manager_;
-    FilterManager filter_manager_;
     Router::ConfigConstSharedPtr snapped_route_config_;
     Router::ScopedConfigConstSharedPtr snapped_scoped_routes_config_;
     Tracing::SpanPtr active_span_;
     const uint64_t stream_id_;
     ResponseEncoder* response_encoder_{};
-    ResponseHeaderMapPtr continue_headers_;
-    ResponseHeaderMapPtr response_headers_;
     Buffer::WatermarkBufferPtr buffered_response_data_;
-    ResponseTrailerMapPtr response_trailers_{};
-    RequestHeaderMapPtr request_headers_;
     Buffer::WatermarkBufferPtr buffered_request_data_;
-    RequestTrailerMapPtr request_trailers_;
-    std::list<AccessLog::InstanceSharedPtr> access_log_handlers_;
     Stats::TimespanPtr request_response_timespan_;
     // Per-stream idle timeout.
     Event::TimerPtr stream_idle_timer_;
@@ -712,6 +719,9 @@ private:
     absl::optional<Router::RouteConstSharedPtr> cached_route_;
     absl::optional<Upstream::ClusterInfoConstSharedPtr> cached_cluster_info_;
     std::list<DownstreamWatermarkCallbacks*> watermark_callbacks_{};
+
+    // The FilterManager must be destroyed *before* the headers/stream info objects to facilitate access logging.
+    FilterManager filter_manager_;
     // Stores metadata added in the decoding filter that is being processed. Will be cleared before
     // processing the next filter. The storage is created on demand. We need to store metadata
     // temporarily in the filter in case the filter has stopped all while processing headers.
