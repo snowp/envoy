@@ -387,8 +387,7 @@ private:
     NullRouteConfigUpdateRequester() = default;
   };
 
-  class FilterManager  :
-                        public FilterChainFactoryCallbacks {
+  class FilterManager : public FilterChainFactoryCallbacks {
   public:
     FilterManager(ActiveStream& parent, FilterChainFactory& filter_chain_factory)
         : parent_(parent), filter_chain_factory_(filter_chain_factory) {}
@@ -490,7 +489,8 @@ private:
 
     ActiveStream& parent_;
 
-    // TODO(snowp): Make these private by 1) implementing ScopeTrackedObject for FM and 2) exposing accessors.
+    // TODO(snowp): Make these private by 1) implementing ScopeTrackedObject for FM and 2) exposing
+    // accessors.
     ResponseHeaderMapPtr continue_headers_;
     ResponseHeaderMapPtr response_headers_;
     ResponseTrailerMapPtr response_trailers_;
@@ -720,7 +720,8 @@ private:
     absl::optional<Upstream::ClusterInfoConstSharedPtr> cached_cluster_info_;
     std::list<DownstreamWatermarkCallbacks*> watermark_callbacks_{};
 
-    // The FilterManager must be destroyed *before* the headers/stream info objects to facilitate access logging.
+    // The FilterManager must be destroyed *before* the headers/stream info objects to facilitate
+    // access logging.
     FilterManager filter_manager_;
     // Stores metadata added in the decoding filter that is being processed. Will be cleared before
     // processing the next filter. The storage is created on demand. We need to store metadata
