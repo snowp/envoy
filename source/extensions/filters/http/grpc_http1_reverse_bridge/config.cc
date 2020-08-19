@@ -14,9 +14,17 @@ namespace GrpcHttp1ReverseBridge {
 Http::FilterFactoryCb Config::createFilterFactoryFromProtoTyped(
     const envoy::extensions::filters::http::grpc_http1_reverse_bridge::v3::FilterConfig& config,
     const std::string&, Server::Configuration::FactoryContext&) {
-  return [config](Envoy::Http::FilterChainFactoryCallbacks& callbacks) -> void {
-    callbacks.addStreamFilter(
-        std::make_shared<Filter>(config.content_type(), config.withhold_grpc_frames()));
+
+  // TODO(snowp): Remove as content_type is removed.
+  if (!config.content_type().empty() &&
+      (config.has_content_type_handling() || !config.upstream_response_validation().empty())) {
+    throw EnvoyException(
+        "Cannot set content_type_handling or upstream_response_validation if content_type is set.");
+  }
+
+  FilterConfig filter_config(config);
+  return [filter_config](Envoy::Http::FilterChainFactoryCallbacks& callbacks) -> void {
+    callbacks.addStreamFilter(std::make_shared<Filter>(filter_config));
   };
 }
 

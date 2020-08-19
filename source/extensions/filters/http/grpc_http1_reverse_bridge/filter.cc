@@ -66,7 +66,32 @@ void adjustContentLength(Http::RequestOrResponseHeaderMap& headers,
     }
   }
 }
+
+absl::optional<std::string> configuredUpstreamContentType(const envoy::extensions::filters::http::grpc_http1_reverse_bridge::v3::FilterConfig& config) {
+  auto content_type = PROTOBUF_GET_WRAPPED_OR_DEFAULT(config.content_type_handling(), upstream_content_type, config.content_type());
+  if (content_type.empty()) {
+    return absl::nullopt;
+  }
+
+  return content_type;
+}
+
+bool configuredPreserveDownstreamContentType(const envoy::extensions::filters::http::grpc_http1_reverse_bridge::v3::FilterConfig& config) {
+  if (config.has_content_type_handling()) {
+    return config.content_type_handling().preserve_downstream_content_type();
+  }
+
+  // If configured via the deprecated content_type flag, preserve the downstream content-type for
+  // backwards compatibility purposes.
+  return !config.content_type().empty();
+}
 } // namespace
+
+FilterConfig::FilterConfig(
+    const envoy::extensions::filters::http::grpc_http1_reverse_bridge::v3::FilterConfig& config)
+    : upstream_content_type_(configuredUpstreamContentType(config)),
+      withhold_grpc_frames_(config.withhold_grpc_frames()),
+      preserve_downstream_content_type_(configuredPreserveDownstreamContentType(config)) {}
 
 Http::FilterHeadersStatus Filter::decodeHeaders(Http::RequestHeaderMap& headers, bool end_stream) {
   // Short circuit if header only.
@@ -92,13 +117,20 @@ Http::FilterHeadersStatus Filter::decodeHeaders(Http::RequestHeaderMap& headers,
   if (Envoy::Grpc::Common::isGrpcRequestHeaders(headers)) {
     enabled_ = true;
 
-    // We keep track of the original content-type to ensure that we handle
+    // If configured to do so, keep track of the original content-type to allow handling
     // gRPC content type variations such as application/grpc+proto.
-    content_type_ = std::string(headers.getContentTypeValue());
-    headers.setContentType(upstream_content_type_);
-    headers.setInline(accept_handle.handle(), upstream_content_type_);
+    if (config_.preserveDownstreamContentType()) {
+      content_type_ = std::string(headers.getContentTypeValue());
+    }
 
-    if (withhold_grpc_frames_) {
+    // Rewrite the upstream content type if configured to do so.
+    if (config_.upstreamContentType()) {
+      headers.setContentType(*config_.upstreamContentType());
+      // TODO(snowp): Should this use a separate configuration flag?
+      headers.setInline(accept_handle.handle(), *config_.upstreamContentType());
+    }
+
+    if (config_.withholdGrpcFrames()) {
       // Adjust the content-length header to account for us removing the gRPC frame header.
       adjustContentLength(headers, [](auto size) { return size - Grpc::GRPC_FRAME_HEADER_SIZE; });
     }
@@ -112,7 +144,7 @@ Http::FilterHeadersStatus Filter::decodeHeaders(Http::RequestHeaderMap& headers,
 }
 
 Http::FilterDataStatus Filter::decodeData(Buffer::Instance& buffer, bool) {
-  if (enabled_ && withhold_grpc_frames_ && !prefix_stripped_) {
+  if (enabled_ && config_.withholdGrpcFrames() && !prefix_stripped_) {
     // Fail the request if the body is too small to possibly contain a gRPC frame.
     if (buffer.length() < Grpc::GRPC_FRAME_HEADER_SIZE) {
       decoder_callbacks_->sendLocalReply(Http::Code::OK, "invalid request body", nullptr,
@@ -140,7 +172,7 @@ Http::FilterHeadersStatus Filter::encodeHeaders(Http::ResponseHeaderMap& headers
       headers.setGrpcStatus(Envoy::Grpc::Status::WellKnownGrpcStatus::Unknown);
       headers.setStatus(enumToInt(Http::Code::OK));
 
-      if (!content_type.empty()) {
+      if (!content_type.empty() && content_type_) {
         headers.setContentType(content_type_);
       }
 
@@ -149,10 +181,12 @@ Http::FilterHeadersStatus Filter::encodeHeaders(Http::ResponseHeaderMap& headers
       return Http::FilterHeadersStatus::ContinueAndEndStream;
     }
 
-    // Restore the content-type to match what the downstream sent.
-    headers.setContentType(content_type_);
+    if (content_type_) {
+      // Restore the content-type to match what the downstream sent.
+      headers.setContentType(content_type_);
+    }
 
-    if (withhold_grpc_frames_) {
+    if (config_.withholdGrpcFrames()) {
       // Adjust content-length to account for the frame header that's added.
       adjustContentLength(headers,
                           [](auto length) { return length + Grpc::GRPC_FRAME_HEADER_SIZE; });

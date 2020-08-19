@@ -16,12 +16,32 @@ namespace Extensions {
 namespace HttpFilters {
 namespace GrpcHttp1ReverseBridge {
 
+class FilterConfig {
+  public:
+  explicit FilterConfig(const envoy::extensions::filters::http::grpc_http1_reverse_bridge::v3::FilterConfig& config);
+  const absl::optional<std::string>& upstreamContentType() const {
+    return upstream_content_type_;
+  }
+  bool withholdGrpcFrames() const {
+    return withhold_grpc_frames_;
+  }
+  bool preserveDownstreamContentType() const {
+    return preserve_downstream_content_type_;
+  }
+
+  const std::vector<HeaderMa
+
+  private:
+    const absl::optional<std::string> upstream_content_type_;
+    const bool withhold_grpc_frames_;
+    const bool preserve_downstream_content_type_;
+};
+
 // When enabled, will downgrade an incoming gRPC http request into a h/1.1 request.
 class Filter : public Envoy::Http::PassThroughFilter {
 public:
-  Filter(std::string upstream_content_type, bool withhold_grpc_frames)
-      : upstream_content_type_(std::move(upstream_content_type)),
-        withhold_grpc_frames_(withhold_grpc_frames) {}
+  explicit Filter(const FilterConfig& config) : config_(config) {}
+
   // Http::StreamDecoderFilter
   Http::FilterHeadersStatus decodeHeaders(Http::RequestHeaderMap& headers,
                                           bool end_stream) override;
@@ -37,16 +57,15 @@ private:
   // Prepend the grpc frame into the buffer
   void buildGrpcFrameHeader(Buffer::Instance& buffer);
 
-  const std::string upstream_content_type_;
-  const bool withhold_grpc_frames_;
+  const FilterConfig& config_;
 
   bool enabled_{};
   bool prefix_stripped_{};
-  std::string content_type_{};
+  absl::optional<std::string> content_type_;
   Grpc::Status::GrpcStatus grpc_status_{};
   // Normally we'd use the encoding buffer, but since we need to mutate the
   // buffer we instead maintain our own.
-  Buffer::OwnedImpl buffer_{};
+  Buffer::OwnedImpl buffer_;
 };
 
 using FilterPtr = std::unique_ptr<Filter>;
