@@ -107,8 +107,8 @@ bool FilterManager::ActiveStreamFilterBase::commonHandleAfter100ContinueHeadersC
   }
 }
 
-bool FilterManager::ActiveStreamFilterBase::commonHandleAfterHeadersCallback(FilterHeadersStatus status,
-                                                              bool& headers_only) {
+bool FilterManager::ActiveStreamFilterBase::commonHandleAfterHeadersCallback(
+    FilterHeadersStatus status, bool& headers_only) {
   ASSERT(!headers_continued_);
   ASSERT(canIterate());
 
@@ -137,7 +137,8 @@ bool FilterManager::ActiveStreamFilterBase::commonHandleAfterHeadersCallback(Fil
   }
 }
 
-void FilterManager::ActiveStreamFilterBase::commonHandleBufferData(Buffer::Instance& provided_data) {
+void FilterManager::ActiveStreamFilterBase::commonHandleBufferData(
+    Buffer::Instance& provided_data) {
 
   // The way we do buffering is a little complicated which is why we have this common function
   // which is used for both encoding and decoding. When data first comes into our filter pipeline,
@@ -153,9 +154,8 @@ void FilterManager::ActiveStreamFilterBase::commonHandleBufferData(Buffer::Insta
   }
 }
 
-bool FilterManager::ActiveStreamFilterBase::commonHandleAfterDataCallback(FilterDataStatus status,
-                                                           Buffer::Instance& provided_data,
-                                                           bool& buffer_was_streaming) {
+bool FilterManager::ActiveStreamFilterBase::commonHandleAfterDataCallback(
+    FilterDataStatus status, Buffer::Instance& provided_data, bool& buffer_was_streaming) {
 
   if (status == FilterDataStatus::Continue) {
     if (iteration_state_ == IterationState::StopSingleIteration) {
@@ -185,7 +185,8 @@ bool FilterManager::ActiveStreamFilterBase::commonHandleAfterDataCallback(Filter
   return true;
 }
 
-bool FilterManager::ActiveStreamFilterBase::commonHandleAfterTrailersCallback(FilterTrailersStatus status) {
+bool FilterManager::ActiveStreamFilterBase::commonHandleAfterTrailersCallback(
+    FilterTrailersStatus status) {
 
   if (status == FilterTrailersStatus::Continue) {
     if (iteration_state_ == IterationState::StopSingleIteration) {
@@ -201,11 +202,17 @@ bool FilterManager::ActiveStreamFilterBase::commonHandleAfterTrailersCallback(Fi
   return true;
 }
 
-const Network::Connection* FilterManager::ActiveStreamFilterBase::connection() { return parent_.connection(); }
+const Network::Connection* FilterManager::ActiveStreamFilterBase::connection() {
+  return parent_.connection();
+}
 
-Event::Dispatcher& FilterManager::ActiveStreamFilterBase::dispatcher() { return parent_.dispatcher_; }
+Event::Dispatcher& FilterManager::ActiveStreamFilterBase::dispatcher() {
+  return parent_.dispatcher_;
+}
 
-StreamInfo::StreamInfo& FilterManager::ActiveStreamFilterBase::streamInfo() { return parent_.stream_info_; }
+StreamInfo::StreamInfo& FilterManager::ActiveStreamFilterBase::streamInfo() {
+  return parent_.stream_info_;
+}
 
 Tracing::Span& FilterManager::ActiveStreamFilterBase::activeSpan() {
   return parent_.filter_manager_callbacks_.activeSpan();
@@ -223,9 +230,12 @@ Upstream::ClusterInfoConstSharedPtr FilterManager::ActiveStreamFilterBase::clust
   return parent_.filter_manager_callbacks_.clusterInfo();
 }
 
-Router::RouteConstSharedPtr FilterManager::ActiveStreamFilterBase::route() { return route(nullptr); }
+Router::RouteConstSharedPtr FilterManager::ActiveStreamFilterBase::route() {
+  return route(nullptr);
+}
 
-Router::RouteConstSharedPtr FilterManager::ActiveStreamFilterBase::route(const Router::RouteCallback& cb) {
+Router::RouteConstSharedPtr
+FilterManager::ActiveStreamFilterBase::route(const Router::RouteCallback& cb) {
   return parent_.filter_manager_callbacks_.route(cb);
 }
 
@@ -255,7 +265,9 @@ Buffer::WatermarkBufferPtr& FilterManager::ActiveStreamDecoderFilter::bufferedDa
   return parent_.buffered_request_data_;
 }
 
-bool FilterManager::ActiveStreamDecoderFilter::complete() { return parent_.state_.remote_complete_; }
+bool FilterManager::ActiveStreamDecoderFilter::complete() {
+  return parent_.state_.remote_complete_;
+}
 
 void FilterManager::ActiveStreamDecoderFilter::doHeaders(bool end_stream) {
   parent_.decodeHeaders(this, *parent_.request_headers_, end_stream);
@@ -269,7 +281,9 @@ void FilterManager::ActiveStreamDecoderFilter::doData(bool end_stream) {
 void FilterManager::ActiveStreamDecoderFilter::doTrailers() {
   parent_.decodeTrailers(this, *parent_.request_trailers_);
 }
-bool FilterManager::ActiveStreamDecoderFilter::hasTrailers() { return parent_.request_trailers_ != nullptr; }
+bool FilterManager::ActiveStreamDecoderFilter::hasTrailers() {
+  return parent_.request_trailers_ != nullptr;
+}
 
 void FilterManager::ActiveStreamDecoderFilter::drainSavedRequestMetadata() {
   ASSERT(saved_request_metadata_ != nullptr);
@@ -296,7 +310,8 @@ RequestTrailerMap& FilterManager::ActiveStreamDecoderFilter::addDecodedTrailers(
   return parent_.addDecodedTrailers();
 }
 
-void FilterManager::ActiveStreamDecoderFilter::addDecodedData(Buffer::Instance& data, bool streaming) {
+void FilterManager::ActiveStreamDecoderFilter::addDecodedData(Buffer::Instance& data,
+                                                              bool streaming) {
   parent_.addDecodedData(*this, data, streaming);
 }
 
@@ -304,8 +319,8 @@ MetadataMapVector& FilterManager::ActiveStreamDecoderFilter::addDecodedMetadata(
   return parent_.addDecodedMetadata();
 }
 
-void FilterManager::ActiveStreamDecoderFilter::injectDecodedDataToFilterChain(Buffer::Instance& data,
-                                                               bool end_stream) {
+void FilterManager::ActiveStreamDecoderFilter::injectDecodedDataToFilterChain(
+    Buffer::Instance& data, bool end_stream) {
   parent_.decodeData(this, data, end_stream,
                      FilterManager::FilterIterationStartState::CanStartFromCurrent);
 }
@@ -329,7 +344,8 @@ void FilterManager::ActiveStreamDecoderFilter::sendLocalReply(
   parent_.sendLocalReply(is_grpc_request_, code, body, modify_headers, grpc_status, details);
 }
 
-void FilterManager::ActiveStreamDecoderFilter::encode100ContinueHeaders(ResponseHeaderMapPtr&& headers) {
+void FilterManager::ActiveStreamDecoderFilter::encode100ContinueHeaders(
+    ResponseHeaderMapPtr&& headers) {
   // If Envoy is not configured to proxy 100-Continue responses, swallow the 100 Continue
   // here. This avoids the potential situation where Envoy strips Expect: 100-Continue and sends a
   // 100-Continue, then proxies a duplicate 100 Continue from upstream.
@@ -339,7 +355,8 @@ void FilterManager::ActiveStreamDecoderFilter::encode100ContinueHeaders(Response
   }
 }
 
-void FilterManager::ActiveStreamDecoderFilter::encodeHeaders(ResponseHeaderMapPtr&& headers, bool end_stream) {
+void FilterManager::ActiveStreamDecoderFilter::encodeHeaders(ResponseHeaderMapPtr&& headers,
+                                                             bool end_stream) {
   parent_.response_headers_ = std::move(headers);
   parent_.encodeHeaders(nullptr, *parent_.response_headers_, end_stream);
 }
@@ -375,7 +392,8 @@ void FilterManager::ActiveStreamDecoderFilter::requestDataTooLarge() {
 
 void FilterManager::addStreamDecoderFilterWorker(StreamDecoderFilterSharedPtr filter,
                                                  bool dual_filter) {
-  FilterManager::ActiveStreamDecoderFilterPtr wrapper(new FilterManager::ActiveStreamDecoderFilter(*this, filter, dual_filter));
+  FilterManager::ActiveStreamDecoderFilterPtr wrapper(
+      new FilterManager::ActiveStreamDecoderFilter(*this, filter, dual_filter));
   filter->setDecoderFilterCallbacks(*wrapper);
   // Note: configured decoder filters are appended to decoder_filters_.
   // This means that if filters are configured in the following order (assume all three filters are
@@ -1236,7 +1254,9 @@ void FilterManager::ActiveStreamDecoderFilter::setDecoderBufferLimit(uint32_t li
   parent_.setBufferLimit(limit);
 }
 
-uint32_t FilterManager::ActiveStreamDecoderFilter::decoderBufferLimit() { return parent_.buffer_limit_; }
+uint32_t FilterManager::ActiveStreamDecoderFilter::decoderBufferLimit() {
+  return parent_.buffer_limit_;
+}
 
 bool FilterManager::ActiveStreamDecoderFilter::recreateStream() {
   // Because the filter's and the HCM view of if the stream has a body and if
@@ -1261,7 +1281,8 @@ void FilterManager::ActiveStreamDecoderFilter::addUpstreamSocketOptions(
   Network::Socket::appendOptions(parent_.upstream_options_, options);
 }
 
-Network::Socket::OptionsSharedPtr FilterManager::ActiveStreamDecoderFilter::getUpstreamSocketOptions() const {
+Network::Socket::OptionsSharedPtr
+FilterManager::ActiveStreamDecoderFilter::getUpstreamSocketOptions() const {
   return parent_.upstream_options_;
 }
 
@@ -1271,7 +1292,8 @@ void FilterManager::ActiveStreamDecoderFilter::requestRouteConfigUpdate(
                                                              std::move(route_config_updated_cb));
 }
 
-absl::optional<Router::ConfigConstSharedPtr> FilterManager::ActiveStreamDecoderFilter::routeConfig() {
+absl::optional<Router::ConfigConstSharedPtr>
+FilterManager::ActiveStreamDecoderFilter::routeConfig() {
   return parent_.filter_manager_callbacks_.routeConfig();
 }
 
@@ -1324,13 +1346,16 @@ void FilterManager::ActiveStreamEncoderFilter::handleMetadataAfterHeadersCallbac
 void FilterManager::ActiveStreamEncoderFilter::doTrailers() {
   parent_.encodeTrailers(this, *parent_.response_trailers_);
 }
-bool FilterManager::ActiveStreamEncoderFilter::hasTrailers() { return parent_.response_trailers_ != nullptr; }
-void FilterManager::ActiveStreamEncoderFilter::addEncodedData(Buffer::Instance& data, bool streaming) {
+bool FilterManager::ActiveStreamEncoderFilter::hasTrailers() {
+  return parent_.response_trailers_ != nullptr;
+}
+void FilterManager::ActiveStreamEncoderFilter::addEncodedData(Buffer::Instance& data,
+                                                              bool streaming) {
   return parent_.addEncodedData(*this, data, streaming);
 }
 
-void FilterManager::ActiveStreamEncoderFilter::injectEncodedDataToFilterChain(Buffer::Instance& data,
-                                                               bool end_stream) {
+void FilterManager::ActiveStreamEncoderFilter::injectEncodedDataToFilterChain(
+    Buffer::Instance& data, bool end_stream) {
   parent_.encodeData(this, data, end_stream,
                      FilterManager::FilterIterationStartState::CanStartFromCurrent);
 }
@@ -1339,7 +1364,8 @@ ResponseTrailerMap& FilterManager::ActiveStreamEncoderFilter::addEncodedTrailers
   return parent_.addEncodedTrailers();
 }
 
-void FilterManager::ActiveStreamEncoderFilter::addEncodedMetadata(MetadataMapPtr&& metadata_map_ptr) {
+void FilterManager::ActiveStreamEncoderFilter::addEncodedMetadata(
+    MetadataMapPtr&& metadata_map_ptr) {
   return parent_.encodeMetadata(this, std::move(metadata_map_ptr));
 }
 
@@ -1357,7 +1383,9 @@ void FilterManager::ActiveStreamEncoderFilter::setEncoderBufferLimit(uint32_t li
   parent_.setBufferLimit(limit);
 }
 
-uint32_t FilterManager::ActiveStreamEncoderFilter::encoderBufferLimit() { return parent_.buffer_limit_; }
+uint32_t FilterManager::ActiveStreamEncoderFilter::encoderBufferLimit() {
+  return parent_.buffer_limit_;
+}
 
 void FilterManager::ActiveStreamEncoderFilter::continueEncoding() { commonContinue(); }
 
@@ -1371,7 +1399,8 @@ void FilterManager::ActiveStreamEncoderFilter::modifyEncodingBuffer(
   callback(*parent_.buffered_response_data_.get());
 }
 
-Http1StreamEncoderOptionsOptRef FilterManager::ActiveStreamEncoderFilter::http1StreamEncoderOptions() {
+Http1StreamEncoderOptionsOptRef
+FilterManager::ActiveStreamEncoderFilter::http1StreamEncoderOptions() {
   // TODO(mattklein123): At some point we might want to actually wrap this interface but for now
   // we give the filter direct access to the encoder options.
   return parent_.filter_manager_callbacks_.http1StreamEncoderOptions();
@@ -1396,7 +1425,9 @@ void FilterManager::ActiveStreamEncoderFilter::responseDataDrained() {
   onEncoderFilterBelowWriteBufferLowWatermark();
 }
 
-void FilterManager::ActiveStreamFilterBase::resetStream() { parent_.filter_manager_callbacks_.resetStream(); }
+void FilterManager::ActiveStreamFilterBase::resetStream() {
+  parent_.filter_manager_callbacks_.resetStream();
+}
 
 uint64_t FilterManager::ActiveStreamFilterBase::streamId() const { return parent_.streamId(); }
 
