@@ -137,7 +137,7 @@ protected:
     EXPECT_TRUE(TestUtility::protoEqual(envoy::config::core::v3::Metadata::default_instance(),
                                         *data.host_description_->metadata()));
     data.host_description_->outlierDetector().putHttpResponseCode(200);
-    data.host_description_->healthChecker().setUnhealthy();
+    data.host_description_->healthChecker().setUnhealthy(false);
 
     expectResolve(Network::DnsLookupFamily::V4Only, expected_address);
     resolve_timer_->invokeCallback();
@@ -290,7 +290,7 @@ TEST_P(LogicalDnsParamTest, ImmediateResolve) {
   EXPECT_EQ(1UL, cluster_->prioritySet().hostSetsPerPriority()[0]->healthyHosts().size());
   EXPECT_EQ("foo.bar.com",
             cluster_->prioritySet().hostSetsPerPriority()[0]->hosts()[0]->hostname());
-  cluster_->prioritySet().hostSetsPerPriority()[0]->hosts()[0]->healthChecker().setUnhealthy();
+  cluster_->prioritySet().hostSetsPerPriority()[0]->hosts()[0]->healthChecker().setUnhealthy(false);
   tls_.shutdownThread();
 }
 

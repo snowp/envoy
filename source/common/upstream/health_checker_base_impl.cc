@@ -7,6 +7,7 @@
 
 #include "common/network/utility.h"
 #include "common/router/router.h"
+#include "envoy/upstream/outlier_detection.h"
 
 namespace Envoy {
 namespace Upstream {
@@ -179,15 +180,44 @@ void HealthCheckerImplBase::runCallbacks(HostSharedPtr host, HealthTransition ch
   }
 }
 
-void HealthCheckerImplBase::HealthCheckHostMonitorImpl::setUnhealthy() {
+void HealthCheckerImplBase::HealthCheckHostMonitorImpl::setUnhealthy(bool immediate) {
   // This is called cross thread. The cluster/health checker might already be gone.
   std::shared_ptr<HealthCheckerImplBase> health_checker = health_checker_.lock();
   if (health_checker) {
-    health_checker->setUnhealthyCrossThread(host_.lock());
+    health_checker->setUnhealthyCrossThread(host_.lock(), immediate);
   }
 }
 
-void HealthCheckerImplBase::setUnhealthyCrossThread(const HostSharedPtr& host) {
+void HealthCheckerImplBase::HealthCheckHostMonitorImpl::clearImmediateHealthCheckFailure() {
+  // This is called cross thread. The cluster/health checker might already be gone.
+  std::shared_ptr<HealthCheckerImplBase> health_checker = health_checker_.lock();
+  if (health_checker) {
+    auto host = host_.lock();
+    // TODO(snowp): Should this require more than one indication that the host should be included again?
+    // Note: This is not guaranteed to happen exactly once since we're not using an atomic operation to
+    // do this update.
+    if (host->healthFlagGet(Host::HealthFlag::EXCLUDE_FROM_LB)) {
+      host->healthFlagClear(Host::HealthFlag::EXCLUDE_FROM_LB);
+      health_checker->clearImmediateHealthCheckFailureCrossThread(host);
+    }
+  }
+}
+
+
+void HealthCheckerImplBase::clearImmediateHealthCheckFailureCrossThread(const HostSharedPtr& host) {
+  doCrossThread(host, [](auto& session) {
+    session.clearImmediateFail();
+  });
+}
+
+void HealthCheckerImplBase::setUnhealthyCrossThread(const HostSharedPtr& host, bool immediate) {
+  doCrossThread(host, [immediate](auto& session) {
+    session.setUnhealthy(envoy::data::core::v3::PASSIVE, immediate);
+  });
+}
+
+void HealthCheckerImplBase::doCrossThread(
+    const HostSharedPtr& host, std::function<void(ActiveHealthCheckSession&)> session_update_func) {
   // The threading here is complex. The cluster owns the only strong reference to the health
   // checker. It might go away when we post to the main thread from a worker thread. To deal with
   // this we use the following sequence of events:
@@ -196,7 +226,7 @@ void HealthCheckerImplBase::setUnhealthyCrossThread(const HostSharedPtr& host) {
   // 2) On the main thread, we make sure it is still valid (as the cluster may have been destroyed).
   // 3) Additionally, the host/session may also be gone by then so we check that also.
   std::weak_ptr<HealthCheckerImplBase> weak_this = shared_from_this();
-  dispatcher_.post([weak_this, host]() -> void {
+  dispatcher_.post([session_update_func, host, weak_this]() -> void {
     std::shared_ptr<HealthCheckerImplBase> shared_this = weak_this.lock();
     if (shared_this == nullptr) {
       return;
@@ -207,7 +237,7 @@ void HealthCheckerImplBase::setUnhealthyCrossThread(const HostSharedPtr& host) {
       return;
     }
 
-    session->second->setUnhealthy(envoy::data::core::v3::PASSIVE);
+    session_update_func(*session->second);
   });
 }
 
@@ -274,6 +304,8 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degrade
   }
 
   changed_state = clearPendingFlag(changed_state);
+  // Since we've seen a good health check, 
+  clearImmediateFail();
 
   if (degraded != host_->healthFlagGet(Host::HealthFlag::DEGRADED_ACTIVE_HC)) {
     if (degraded) {
@@ -306,14 +338,26 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degrade
 }
 
 HealthTransition HealthCheckerImplBase::ActiveHealthCheckSession::setUnhealthy(
-    envoy::data::core::v3::HealthCheckFailureType type) {
+    envoy::data::core::v3::HealthCheckFailureType type, bool immediate) {
   // If we are unhealthy, reset the # of healthy to zero.
   num_healthy_ = 0;
 
+  // Either we update the health of the host here, or we must wait for more failures if we haven't reached
+  // the unhealthy threshold yet. 
+  // Network errors always flag the host as unhealthy, regardless of threshold.
   HealthTransition changed_state = HealthTransition::Unchanged;
   if (!host_->healthFlagGet(Host::HealthFlag::FAILED_ACTIVE_HC)) {
     if (type != envoy::data::core::v3::NETWORK ||
         ++num_unhealthy_ == parent_.unhealthy_threshold_) {
+
+      // In the case of an immediate health check failure, we've been given explicit notification
+      // that this endpoint should not be routed to anymore, so exclude it from the load balancer
+      // going forward.
+      // TODO(snowp): 
+      if (immediate) {
+        host_->healthFlagSet(Host::HealthFlag::EXCLUDE_FROM_LB);
+      }
+
       host_->healthFlagSet(Host::HealthFlag::FAILED_ACTIVE_HC);
       parent_.decHealthy();
       changed_state = HealthTransition::Changed;
@@ -343,9 +387,13 @@ HealthTransition HealthCheckerImplBase::ActiveHealthCheckSession::setUnhealthy(
   return changed_state;
 }
 
+void HealthCheckerImplBase::ActiveHealthCheckSession::clearImmediateFail() {
+  host_->healthFlagClear(Host::HealthFlag::EXCLUDE_FROM_LB);
+}
+
 void HealthCheckerImplBase::ActiveHealthCheckSession::handleFailure(
-    envoy::data::core::v3::HealthCheckFailureType type) {
-  HealthTransition changed_state = setUnhealthy(type);
+    envoy::data::core::v3::HealthCheckFailureType type, bool immediate) {
+  HealthTransition changed_state = setUnhealthy(type, immediate);
   // It's possible that the previous call caused this session to be deferred deleted.
   if (timeout_timer_ != nullptr) {
     timeout_timer_->disableTimer();
@@ -376,7 +424,7 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::onIntervalBase() {
 
 void HealthCheckerImplBase::ActiveHealthCheckSession::onTimeoutBase() {
   onTimeout();
-  handleFailure(envoy::data::core::v3::NETWORK);
+  handleFailure(envoy::data::core::v3::NETWORK, false);
 }
 
 void HealthCheckerImplBase::ActiveHealthCheckSession::onInitialInterval() {

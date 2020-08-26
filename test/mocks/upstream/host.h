@@ -74,7 +74,8 @@ public:
   MockHealthCheckHostMonitor();
   ~MockHealthCheckHostMonitor() override;
 
-  MOCK_METHOD(void, setUnhealthy, ());
+  MOCK_METHOD(void, setUnhealthy, (bool));
+  MOCK_METHOD(void, clearImmediateHealthCheckFailure, ());
 };
 
 class MockHostDescription : public HostDescription {

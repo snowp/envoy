@@ -285,17 +285,21 @@ void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onResetStream(Http::St
 
   ENVOY_CONN_LOG(debug, "connection/stream error health_flags={}", *client_,
                  HostUtility::healthFlagsToString(*host_));
-  handleFailure(envoy::data::core::v3::NETWORK);
+  handleFailure(envoy::data::core::v3::NETWORK, false);
 }
 
-HttpHealthCheckerImpl::HttpActiveHealthCheckSession::HealthCheckResult
+std::pair<HttpHealthCheckerImpl::HttpActiveHealthCheckSession::HealthCheckResult, bool>
 HttpHealthCheckerImpl::HttpActiveHealthCheckSession::healthCheckResult() {
   uint64_t response_code = Http::Utility::getResponseStatus(*response_headers_);
   ENVOY_CONN_LOG(debug, "hc response={} health_flags={}", *client_, response_code,
                  HostUtility::healthFlagsToString(*host_));
 
+  // TODO(snowp): Here we assume that this flag will only be set when we fail the health check, but
+  // that's not really enforced anywhere especially if the upstream is not an Envoy instance.
+  const auto immediate = response_headers_->EnvoyImmediateHealthCheckFail() != nullptr;
+
   if (!parent_.http_status_checker_.inRange(response_code)) {
-    return HealthCheckResult::Failed;
+    return {HealthCheckResult::Failed, immediate};
   }
 
   const auto degraded = response_headers_->EnvoyDegraded() != nullptr;
@@ -308,17 +312,18 @@ HttpHealthCheckerImpl::HttpActiveHealthCheckSession::healthCheckResult() {
             ? std::string(response_headers_->getEnvoyUpstreamHealthCheckedClusterValue())
             : EMPTY_STRING;
     if (parent_.service_name_matcher_->match(service_cluster_healthchecked)) {
-      return degraded ? HealthCheckResult::Degraded : HealthCheckResult::Succeeded;
+      return {degraded ? HealthCheckResult::Degraded : HealthCheckResult::Succeeded, false};
     } else {
-      return HealthCheckResult::Failed;
+      return {HealthCheckResult::Failed, immediate};
     }
   }
 
-  return degraded ? HealthCheckResult::Degraded : HealthCheckResult::Succeeded;
+  return {degraded ? HealthCheckResult::Degraded : HealthCheckResult::Succeeded, false};
 }
 
 void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onResponseComplete() {
-  switch (healthCheckResult()) {
+  auto result_and_immediate = healthCheckResult();
+  switch (result_and_immediate.first) {
   case HealthCheckResult::Succeeded:
     handleSuccess(false);
     break;
@@ -327,7 +332,7 @@ void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onResponseComplete() {
     break;
   case HealthCheckResult::Failed:
     host_->setActiveHealthFailureType(Host::ActiveHealthFailureType::UNHEALTHY);
-    handleFailure(envoy::data::core::v3::ACTIVE);
+    handleFailure(envoy::data::core::v3::ACTIVE, result_and_immediate.second);
     break;
   }
 
@@ -481,7 +486,7 @@ void TcpHealthCheckerImpl::TcpActiveHealthCheckSession::onEvent(Network::Connect
   if (event == Network::ConnectionEvent::RemoteClose ||
       event == Network::ConnectionEvent::LocalClose) {
     if (!expect_close_) {
-      handleFailure(envoy::data::core::v3::NETWORK);
+      handleFailure(envoy::data::core::v3::NETWORK, false);
     }
     parent_.dispatcher_.deferredDelete(std::move(client_));
   }
@@ -727,7 +732,7 @@ void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onResetStream(Http::St
   // Http::StreamResetReason::RemoteReset or Http::StreamResetReason::ConnectionTermination (both
   // mean connection close), check if connection is not fresh (was used for at least 1 request)
   // and silently retry request on the fresh connection. This is also true for HTTP/1.1 healthcheck.
-  handleFailure(envoy::data::core::v3::NETWORK);
+  handleFailure(envoy::data::core::v3::NETWORK, false);
 }
 
 void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onGoAway(
@@ -745,7 +750,7 @@ void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onGoAway(
 
   // Even if we have active health check probe, fail it on GOAWAY and schedule new one.
   if (request_encoder_) {
-    handleFailure(envoy::data::core::v3::NETWORK);
+    handleFailure(envoy::data::core::v3::NETWORK, false);
     expect_reset_ = true;
     request_encoder_->getStream().resetStream(Http::StreamResetReason::LocalReset);
   }
@@ -772,7 +777,7 @@ void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onRpcComplete(
   if (isHealthCheckSucceeded(grpc_status)) {
     handleSuccess(false);
   } else {
-    handleFailure(envoy::data::core::v3::ACTIVE);
+    handleFailure(envoy::data::core::v3::ACTIVE, false);
   }
 
   // Read the value as we may call resetState() and clear it.

@@ -8,6 +8,11 @@ namespace {
 
 void setHealthFlag(Upstream::Host::HealthFlag flag, const Host& host, std::string& health_status) {
   switch (flag) {
+    case Host::HealthFlag::EXCLUDE_FROM_LB:
+    if (host.healthFlagGet(Host::HealthFlag::EXCLUDE_FROM_LB)) {
+      health_status += "/exclude_from_lb";
+    }
+    break;
   case Host::HealthFlag::FAILED_ACTIVE_HC: {
     if (host.healthFlagGet(Host::HealthFlag::FAILED_ACTIVE_HC)) {
       health_status += "/failed_active_hc";

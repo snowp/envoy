@@ -66,7 +66,8 @@ namespace Upstream {
 class HealthCheckHostMonitorNullImpl : public HealthCheckHostMonitor {
 public:
   // Upstream::HealthCheckHostMonitor
-  void setUnhealthy() override {}
+  void setUnhealthy(bool) override {}
+  void clearImmediateHealthCheckFailure() override {}
 };
 
 /**
@@ -218,6 +219,9 @@ public:
         healthFlagGet(HealthFlag::FAILED_EDS_HEALTH)) {
       return Host::Health::Unhealthy;
     }
+
+    // We should only ever try to exclude unhealthy endpoints from the LB.
+    ASSERT(!healthFlagGet(HealthFlag::EXCLUDE_FROM_LB));
 
     // If any of the degraded flags are set, host is degraded.
     if (healthFlagGet(HealthFlag::DEGRADED_ACTIVE_HC) ||

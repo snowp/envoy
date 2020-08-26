@@ -58,7 +58,8 @@ protected:
   class ActiveHealthCheckSession : public Event::DeferredDeletable {
   public:
     ~ActiveHealthCheckSession() override;
-    HealthTransition setUnhealthy(envoy::data::core::v3::HealthCheckFailureType type);
+    HealthTransition setUnhealthy(envoy::data::core::v3::HealthCheckFailureType type, bool immediate);
+    void clearImmediateFail();
     void onDeferredDeleteBase();
     void start() { onInitialInterval(); }
 
@@ -67,7 +68,7 @@ protected:
 
     void handleSuccess(bool degraded = false);
     void handleDegraded();
-    void handleFailure(envoy::data::core::v3::HealthCheckFailureType type);
+    void handleFailure(envoy::data::core::v3::HealthCheckFailureType type, bool immediate);
 
     HostSharedPtr host_;
 
@@ -120,7 +121,8 @@ private:
         : health_checker_(health_checker), host_(host) {}
 
     // Upstream::HealthCheckHostMonitor
-    void setUnhealthy() override;
+    void setUnhealthy(bool immediate) override;
+    void clearImmediateHealthCheckFailure() override;
 
     std::weak_ptr<HealthCheckerImplBase> health_checker_;
     std::weak_ptr<Host> host_;
@@ -137,7 +139,10 @@ private:
                                                std::chrono::milliseconds interval_jitter) const;
   void onClusterMemberUpdate(const HostVector& hosts_added, const HostVector& hosts_removed);
   void runCallbacks(HostSharedPtr host, HealthTransition changed_state);
-  void setUnhealthyCrossThread(const HostSharedPtr& host);
+  void clearImmediateHealthCheckFailureCrossThread(const HostSharedPtr& host);
+  void doCrossThread(const HostSharedPtr& host,
+                     std::function<void(ActiveHealthCheckSession&)> session_update_func);
+  void setUnhealthyCrossThread(const HostSharedPtr& host, bool immediate);
   static std::shared_ptr<const Network::TransportSocketOptionsImpl>
   initTransportSocketOptions(const envoy::config::core::v3::HealthCheck& config);
   static MetadataConstSharedPtr

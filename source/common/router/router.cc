@@ -1196,7 +1196,9 @@ void Filter::onUpstreamHeaders(uint64_t response_code, Http::ResponseHeaderMapPt
   }
 
   if (headers->EnvoyImmediateHealthCheckFail() != nullptr) {
-    upstream_request.upstreamHost()->healthChecker().setUnhealthy();
+    upstream_request.upstreamHost()->healthChecker().setUnhealthy(true);
+  } else {
+    upstream_request.upstreamHost()->healthChecker().clearImmediateHealthCheckFailure();
   }
 
   bool could_not_retry = false;

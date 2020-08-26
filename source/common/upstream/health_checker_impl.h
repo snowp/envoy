@@ -78,7 +78,7 @@ private:
 
     void onResponseComplete();
     enum class HealthCheckResult { Succeeded, Degraded, Failed };
-    HealthCheckResult healthCheckResult();
+    std::pair<HealthCheckResult, bool> healthCheckResult();
     bool shouldClose() const;
 
     // ActiveHealthCheckSession
