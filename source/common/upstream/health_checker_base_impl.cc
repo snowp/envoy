@@ -4,10 +4,10 @@
 #include "envoy/config/core/v3/health_check.pb.h"
 #include "envoy/data/core/v3/health_check_event.pb.h"
 #include "envoy/stats/scope.h"
+#include "envoy/upstream/outlier_detection.h"
 
 #include "common/network/utility.h"
 #include "common/router/router.h"
-#include "envoy/upstream/outlier_detection.h"
 
 namespace Envoy {
 namespace Upstream {
@@ -193,9 +193,9 @@ void HealthCheckerImplBase::HealthCheckHostMonitorImpl::clearImmediateHealthChec
   std::shared_ptr<HealthCheckerImplBase> health_checker = health_checker_.lock();
   if (health_checker) {
     auto host = host_.lock();
-    // TODO(snowp): Should this require more than one indication that the host should be included again?
-    // Note: This is not guaranteed to happen exactly once since we're not using an atomic operation to
-    // do this update.
+    // TODO(snowp): Should this require more than one indication that the host should be included
+    // again? Note: This is not guaranteed to happen exactly once since we're not using an atomic
+    // operation to do this update.
     if (host->healthFlagGet(Host::HealthFlag::EXCLUDE_FROM_LB)) {
       host->healthFlagClear(Host::HealthFlag::EXCLUDE_FROM_LB);
       health_checker->clearImmediateHealthCheckFailureCrossThread(host);
@@ -203,11 +203,8 @@ void HealthCheckerImplBase::HealthCheckHostMonitorImpl::clearImmediateHealthChec
   }
 }
 
-
 void HealthCheckerImplBase::clearImmediateHealthCheckFailureCrossThread(const HostSharedPtr& host) {
-  doCrossThread(host, [](auto& session) {
-    session.clearImmediateFail();
-  });
+  doCrossThread(host, [](auto& session) { session.clearImmediateFail(); });
 }
 
 void HealthCheckerImplBase::setUnhealthyCrossThread(const HostSharedPtr& host, bool immediate) {
@@ -304,7 +301,7 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degrade
   }
 
   changed_state = clearPendingFlag(changed_state);
-  // Since we've seen a good health check, 
+  // Since we've seen a good health check,
   clearImmediateFail();
 
   if (degraded != host_->healthFlagGet(Host::HealthFlag::DEGRADED_ACTIVE_HC)) {
@@ -342,9 +339,9 @@ HealthTransition HealthCheckerImplBase::ActiveHealthCheckSession::setUnhealthy(
   // If we are unhealthy, reset the # of healthy to zero.
   num_healthy_ = 0;
 
-  // Either we update the health of the host here, or we must wait for more failures if we haven't reached
-  // the unhealthy threshold yet. 
-  // Network errors always flag the host as unhealthy, regardless of threshold.
+  // Either we update the health of the host here, or we must wait for more failures if we haven't
+  // reached the unhealthy threshold yet. Network errors always flag the host as unhealthy,
+  // regardless of threshold.
   HealthTransition changed_state = HealthTransition::Unchanged;
   if (!host_->healthFlagGet(Host::HealthFlag::FAILED_ACTIVE_HC)) {
     if (type != envoy::data::core::v3::NETWORK ||
@@ -353,7 +350,7 @@ HealthTransition HealthCheckerImplBase::ActiveHealthCheckSession::setUnhealthy(
       // In the case of an immediate health check failure, we've been given explicit notification
       // that this endpoint should not be routed to anymore, so exclude it from the load balancer
       // going forward.
-      // TODO(snowp): 
+      // TODO(snowp):
       if (immediate) {
         host_->healthFlagSet(Host::HealthFlag::EXCLUDE_FROM_LB);
       }

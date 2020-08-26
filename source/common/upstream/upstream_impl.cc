@@ -940,7 +940,8 @@ ClusterImplBase::partitionHostList(const HostVector& hosts) {
     if (host->health() == Host::Health::Degraded) {
       degraded_list->get().emplace_back(host);
     }
-    if (host->healthFlagGet(Host::HealthFlag::PENDING_ACTIVE_HC) || host->healthFlagGet(Host::HealthFlag::EXCLUDE_FROM_LB)) {
+    if (host->healthFlagGet(Host::HealthFlag::PENDING_ACTIVE_HC) ||
+        host->healthFlagGet(Host::HealthFlag::EXCLUDE_FROM_LB)) {
       excluded_list->get().emplace_back(host);
     }
   }

@@ -141,9 +141,9 @@ bool shouldIncludeEdsInDump(const Http::Utility::QueryParams& params) {
 void setHealthFlag(Upstream::Host::HealthFlag flag, const Upstream::Host& host,
                    envoy::admin::v3::HostHealthStatus& health_status) {
   switch (flag) {
-    case Upstream::Host::HealthFlag::EXCLUDE_FROM_LB:
+  case Upstream::Host::HealthFlag::EXCLUDE_FROM_LB:
     // TODO(snowp): Do something here?
-      break;
+    break;
   case Upstream::Host::HealthFlag::FAILED_ACTIVE_HC:
     health_status.set_failed_active_health_check(
         host.healthFlagGet(Upstream::Host::HealthFlag::FAILED_ACTIVE_HC));
