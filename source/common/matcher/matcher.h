@@ -56,6 +56,13 @@ static inline MaybeMatchResult evaluateMatch(MatchTree<DataType>& match_tree,
   return MaybeMatchResult{result.on_match_->action_cb_(), MatchState::MatchComplete};
 }
 
+template<class DataType>
+class InputValidator {
+  virtual ~InputValidator() = default;
+
+  Envoy::Status validatInput(const DataInput<DataType>& type) PURE;
+};
+
 /**
  * Recursively constructs a MatchTree from a protobuf configuration.
  */

@@ -42,3 +42,29 @@ message FilterDependencies {
   // A list of dependencies provided on the encode path.
   repeated Dependency encode_provided = 4;
 }
+
+message MatchDependencies {
+  enum ResolutionStage {
+    // The match result must be resolvable before the filter is processing request headers.
+    DECODING_HEADERS = 0;
+
+    // The match result must be resolvable before the filter is processing request trailers.
+    DECODING_TRAILERS = 1;
+
+    // The match result must be resolvable before the filter is processing response headers.
+    ENCODING_HEADERS = 2;
+
+    // The match result must be resolvable before the filter is processing response trailers.
+    ENCODING_TRAILERS = 3;
+  }
+
+  enum Direction {
+    BOTH = 0;
+    DECODING_ONLY = 1;
+    ENCODING_ONLY = 2;
+  }
+
+  ResolutionStage stage = 1;
+
+  Direction direction = 2;
+}

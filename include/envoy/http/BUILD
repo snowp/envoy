@@ -76,6 +76,7 @@ envoy_cc_library(
         ":header_map_interface",
         "//include/envoy/access_log:access_log_interface",
         "//include/envoy/common:scope_tracker_interface",
+        "@envoy_api//envoy/extensions/filters/common/dependency/v3:pkg_cc_proto",
         "//include/envoy/event:dispatcher_interface",
         "//include/envoy/grpc:status",
         "//include/envoy/matcher:matcher_interface",

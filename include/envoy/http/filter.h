@@ -16,6 +16,7 @@
 #include "envoy/ssl/connection.h"
 #include "envoy/tracing/http_tracer.h"
 #include "envoy/upstream/upstream.h"
+#include "envoy/extensions/filters/common/dependency/v3/dependency.pb.h"
 
 #include "absl/types/optional.h"
 
@@ -900,7 +901,6 @@ public:
   virtual RequestHeaderMapOptConstRef requestHeaders() const PURE;
   virtual ResponseHeaderMapOptConstRef responseHeaders() const PURE;
 };
-
 /**
  * These callbacks are provided by the connection manager to the factory so that the factory can
  * build the filter chain in an application specific way.
@@ -1003,4 +1003,22 @@ public:
 };
 
 } // namespace Http
+
+// For inputs pertaining to HTTP data, require additional functions that help us understand
+// what part of request processing they belong to.
+namespace Matcher {
+template <> class DataInput<Http::HttpMatchingData> {
+public:
+  virtual ~DataInput() = default;
+
+  virtual DataInputGetResult get(const Http::HttpMatchingData& data) PURE;
+
+  virtual envoy::extensions::filters::common::dependency::v3::MatchDependencies::Direction
+  direction() PURE;
+  virtual std::vector<
+      envoy::extensions::filters::common::dependency::v3::MatchDependencies::ResolutionStage>
+  requiredStages() PURE;
+};
+} // namespace Matcher
+
 } // namespace Envoy
