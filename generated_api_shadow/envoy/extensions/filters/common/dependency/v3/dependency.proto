@@ -43,28 +43,34 @@ message FilterDependencies {
   repeated Dependency encode_provided = 4;
 }
 
-message MatchDependencies {
-  enum ResolutionStage {
-    // The match result must be resolvable before the filter is processing request headers.
-    DECODING_HEADERS = 0;
+// Match tree dependencies for a filter. Allows specifying constraints for what
+// actions can be used with a specific filter and optionally what part of the
+// stream processing the action must be resolved by.
+message HTTPMatchDependencies {
+  message ResolutionRequirement {
+    enum ResolutionStage {
+      // The match result can be resolved at any point.
+      ANY = 0;
 
-    // The match result must be resolvable before the filter is processing request trailers.
-    DECODING_TRAILERS = 1;
+      // The match result must be resolvable before the filter is processing headers.
+      HEADERS = 1;
 
-    // The match result must be resolvable before the filter is processing response headers.
-    ENCODING_HEADERS = 2;
+      // The match result must be resolvable before the filter is processing trailers.
+      TRAILERS = 2;
 
-    // The match result must be resolvable before the filter is processing response trailers.
-    ENCODING_TRAILERS = 3;
+      // This match action cannot be resolved at any stage.
+      NOT_ALLOWED = 3;
+    }
+
+    ResolutionStage decode_required_stage = 1;
+
+    ResolutionStage encode_required_stage = 2;
   }
 
-  enum Direction {
-    BOTH = 0;
-    DECODING_ONLY = 1;
-    ENCODING_ONLY = 2;
-  }
-
-  ResolutionStage stage = 1;
-
-  Direction direction = 2;
+  // Resolution requirements for each custom filter action. Only filter actions listed as part
+  // of this map are permitted for custom filters, while all built in actions are permitted for
+  // all filters by default. If a built in action is listed here, requirements can be added to
+  // this action, e.g. to disable it or ensuring that it is resoled before a specific part of
+  // stream processing.
+  map<string, ResolutionRequirement> per_action_resolution_requirement = 1;
 }
