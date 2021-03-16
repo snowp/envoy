@@ -17,7 +17,10 @@ namespace Matching {
 template <class HeaderType>
 class HttpHeadersDataInputBase : public Matcher::DataInput<HttpMatchingData> {
 public:
-  explicit HttpHeadersDataInputBase(const std::string& name) : name_(name) {}
+  HttpHeadersDataInputBase(const std::string& name,
+                           envoy::extensions::filters::common::dependency::v3::
+                               HTTPMatchDependencies::ResolutionRequirement::ResolutionStage stage)
+      : name_(name), stage_(stage) {}
 
   virtual absl::optional<std::reference_wrapper<const HeaderType>>
   headerMap(const HttpMatchingData& data) const PURE;
@@ -45,8 +48,16 @@ public:
             header_as_string_result_->result()};
   }
 
+  std::vector<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies::
+                  ResolutionRequirement::ResolutionStage>
+  requiredStages() override {
+    return {stage_};
+  }
+
 private:
   const LowerCaseString name_;
+  const envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies::
+      ResolutionRequirement::ResolutionStage stage_;
   absl::optional<HeaderUtility::GetAllOfHeaderAsStringResult> header_as_string_result_;
 };
 
@@ -78,7 +89,9 @@ private:
 
 class HttpRequestHeadersDataInput : public HttpHeadersDataInputBase<RequestHeaderMap> {
 public:
-  explicit HttpRequestHeadersDataInput(const std::string& name) : HttpHeadersDataInputBase(name) {}
+  explicit HttpRequestHeadersDataInput(const std::string& name)
+      : HttpHeadersDataInputBase(name, envoy::extensions::filters::common::dependency::v3::
+                                           HTTPMatchDependencies::ResolutionRequirement::HEADERS) {}
 
   absl::optional<std::reference_wrapper<const RequestHeaderMap>>
   headerMap(const HttpMatchingData& data) const override {
@@ -95,7 +108,9 @@ public:
 
 class HttpResponseHeadersDataInput : public HttpHeadersDataInputBase<ResponseHeaderMap> {
 public:
-  explicit HttpResponseHeadersDataInput(const std::string& name) : HttpHeadersDataInputBase(name) {}
+  explicit HttpResponseHeadersDataInput(const std::string& name)
+      : HttpHeadersDataInputBase(name, envoy::extensions::filters::common::dependency::v3::
+                                           HTTPMatchDependencies::ResolutionRequirement::HEADERS) {}
 
   absl::optional<std::reference_wrapper<const ResponseHeaderMap>>
   headerMap(const HttpMatchingData& data) const override {
@@ -112,7 +127,10 @@ public:
 
 class HttpRequestTrailersDataInput : public HttpHeadersDataInputBase<RequestTrailerMap> {
 public:
-  explicit HttpRequestTrailersDataInput(const std::string& name) : HttpHeadersDataInputBase(name) {}
+  explicit HttpRequestTrailersDataInput(const std::string& name)
+      : HttpHeadersDataInputBase(name, envoy::extensions::filters::common::dependency::v3::
+                                           HTTPMatchDependencies::ResolutionRequirement::TRAILERS) {
+  }
 
   absl::optional<std::reference_wrapper<const RequestTrailerMap>>
   headerMap(const HttpMatchingData& data) const override {
@@ -130,7 +148,9 @@ public:
 class HttpResponseTrailersDataInput : public HttpHeadersDataInputBase<ResponseTrailerMap> {
 public:
   explicit HttpResponseTrailersDataInput(const std::string& name)
-      : HttpHeadersDataInputBase(name) {}
+      : HttpHeadersDataInputBase(name, envoy::extensions::filters::common::dependency::v3::
+                                           HTTPMatchDependencies::ResolutionRequirement::TRAILERS) {
+  }
 
   absl::optional<std::reference_wrapper<const ResponseTrailerMap>>
   headerMap(const HttpMatchingData& data) const override {

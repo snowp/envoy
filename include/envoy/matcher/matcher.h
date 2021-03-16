@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -78,7 +79,7 @@ using ActionFactoryCb = std::function<ActionPtr()>;
 class ActionFactory : public Config::TypedFactory {
 public:
   virtual ActionFactoryCb
-  createActionFactoryCb(const Protobuf::Message& config,
+  createActionFactoryCb(const Protobuf::Message& config, const std::string& stats_prefix,
                         Server::Configuration::FactoryContext& factory_context) PURE;
 
   std::string category() const override { return "envoy.matching.action"; }
@@ -211,6 +212,8 @@ public:
 };
 
 template <class DataType> using DataInputPtr = std::unique_ptr<DataInput<DataType>>;
+template <class DataType>
+using DataInputConstRef = std::reference_wrapper<const DataInput<DataType>>;
 
 /**
  * Factory for data inputs.
@@ -235,6 +238,5 @@ public:
     return fmt::format("envoy.matching.{}.input", DataType::name());
   }
 };
-
 } // namespace Matcher
 } // namespace Envoy

@@ -1,5 +1,8 @@
+#include <bits/stdint-uintn.h>
+
 #include <exception>
 #include <memory>
+#include <vector>
 
 #include "envoy/config/common/matcher/v3/matcher.pb.validate.h"
 #include "envoy/config/core/v3/extension.pb.h"
@@ -17,15 +20,55 @@
 
 #include "gtest/gtest.h"
 
+using testing::ContainerEq;
+using testing::SizeIs;
+using testing::UnorderedElementsAreArray;
+
 namespace Envoy {
 namespace Matcher {
+
+struct TrackingTreeValidator : public MatchTreeValidator<TestData> {
+
+  absl::Status validatePath(const std::vector<DataInputConstRef<TestData>>& path,
+                            const std::string& action_type_url) override {
+    PathWithAction path_with_action;
+    path_with_action.action_type_url_ = action_type_url;
+
+    for (const auto& p : path) {
+      path_with_action.input_values_.push_back(
+          std::string(static_cast<const TestInput&>(p.get()).result_.data_.value_or("")));
+    }
+
+    paths_.push_back(std::move(path_with_action));
+
+    return absl::OkStatus();
+  }
+
+  struct PathWithAction {
+    std::vector<std::string> input_values_;
+    std::string action_type_url_;
+
+    bool operator==(const PathWithAction& other) const {
+      return input_values_ == other.input_values_ && action_type_url_ == other.action_type_url_;
+    }
+  };
+
+  void expectPaths(const std::vector<PathWithAction>& paths) {
+    EXPECT_THAT(paths, UnorderedElementsAreArray(paths));
+  }
+
+  std::vector<PathWithAction> paths_;
+};
+
 class MatcherTest : public ::testing::Test {
 public:
-  MatcherTest() : inject_action_(action_factory_) {}
+  MatcherTest() : inject_action_(action_factory_), factory_(factory_context_, validator_) {}
 
   StringActionFactory action_factory_;
   Registry::InjectFactory<ActionFactory> inject_action_;
   NiceMock<Server::Configuration::MockFactoryContext> factory_context_;
+  TrackingTreeValidator validator_;
+  MatchTreeFactory<TestData> factory_;
 };
 
 TEST_F(MatcherTest, TestMatcher) {
@@ -62,12 +105,10 @@ matcher_tree:
 
   TestUtility::validate(matcher);
 
-  MatchTreeFactory<TestData> factory(factory_context_);
-
   auto outer_factory = TestDataInputFactory("outer_input", "value");
   auto inner_factory = TestDataInputFactory("inner_input", "foo");
 
-  auto match_tree = factory.create(matcher);
+  auto match_tree = factory_.create(matcher);
 
   const auto result = match_tree->match(TestData());
   EXPECT_EQ(result.match_state_, MatchState::MatchComplete);
@@ -101,12 +142,10 @@ matcher_list:
 
   TestUtility::validate(matcher);
 
-  MatchTreeFactory<TestData> factory(factory_context_);
-
   auto inner_factory = TestDataInputFactory("inner_input", "foo");
   NeverMatchFactory match_factory;
 
-  auto match_tree = factory.create(matcher);
+  auto match_tree = factory_.create(matcher);
 
   const auto result = match_tree->match(TestData());
   EXPECT_EQ(result.match_state_, MatchState::MatchComplete);
@@ -156,18 +195,86 @@ matcher_tree:
 
   TestUtility::validate(matcher);
 
-  MatchTreeFactory<TestData> factory(factory_context_);
-
   auto outer_factory = TestDataInputFactory("outer_input", "value");
   auto inner_factory = TestDataInputFactory("inner_input", "foo");
 
-  auto match_tree = factory.create(matcher);
+  auto match_tree = factory_.create(matcher);
+
+  validator_.expectPaths({{{"value", "foo", "foo"}, "google.protobuf.StringValue"}});
 
   const auto result = match_tree->match(TestData());
   EXPECT_EQ(result.match_state_, MatchState::MatchComplete);
   EXPECT_TRUE(result.on_match_.has_value());
   EXPECT_NE(result.on_match_->action_cb_, nullptr);
 }
+
+TEST_F(MatcherTest, TestMultipleBranches) {
+  const std::string yaml = R"EOF(
+matcher_tree:
+  input:
+    name: outer_input
+    typed_config:
+      "@type": type.googleapis.com/google.protobuf.StringValue
+  exact_match_map:
+    map:
+      outer:
+        matcher:
+          matcher_list:
+            matchers:
+            - on_match:
+                action:
+                  name: test_action
+                  typed_config:
+                    "@type": type.googleapis.com/google.protobuf.StringValue
+                    value: match!!
+              predicate:
+                single_predicate:
+                  input:
+                    name: first_inner
+                    typed_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                  value_match:
+                    exact: first
+      "not-used":
+        matcher:
+          matcher_list:
+            matchers:
+            - on_match:
+                action:
+                  name: test_action
+                  typed_config:
+                    "@type": type.googleapis.com/google.protobuf.StringValue
+                    value: match!!
+              predicate:
+                single_predicate:
+                  input:
+                    name: second_inner
+                    typed_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                  value_match:
+                    exact: second
+  )EOF";
+
+  envoy::config::common::matcher::v3::Matcher matcher;
+  MessageUtil::loadFromYaml(yaml, matcher, ProtobufMessage::getStrictValidationVisitor());
+
+  TestUtility::validate(matcher);
+
+  auto outer_factory = TestDataInputFactory("outer_input", "outer");
+  auto first_inner_factory = TestDataInputFactory("first_inner", "first");
+  auto second_inner_factory = TestDataInputFactory("second_inner", "second");
+
+  auto match_tree = factory_.create(matcher);
+
+  EXPECT_EQ(2, validator_.paths_.size());
+  validator_.expectPaths({{{"outer", "second"}, "google.protobuf.StringValue"},
+                          {{"outer", "first"}, "google.protobuf.StringValue"}});
+
+  const auto result = match_tree->match(TestData());
+  EXPECT_EQ(result.match_state_, MatchState::MatchComplete);
+  EXPECT_TRUE(result.on_match_.has_value());
+  EXPECT_NE(result.on_match_->action_cb_, nullptr);
+} // namespace Matcher
 
 TEST_F(MatcherTest, TestOrMatcher) {
   const std::string yaml = R"EOF(
@@ -212,12 +319,13 @@ matcher_tree:
 
   TestUtility::validate(matcher);
 
-  MatchTreeFactory<TestData> factory(factory_context_);
-
   auto outer_factory = TestDataInputFactory("outer_input", "value");
   auto inner_factory = TestDataInputFactory("inner_input", "foo");
 
-  auto match_tree = factory.create(matcher);
+  auto match_tree = factory_.create(matcher);
+
+  EXPECT_EQ(1, validator_.paths_.size());
+  validator_.expectPaths({{{"value", "foo", "foo"}, "google.protobuf.StringValue"}});
 
   const auto result = match_tree->match(TestData());
   EXPECT_EQ(result.match_state_, MatchState::MatchComplete);
@@ -250,11 +358,11 @@ matcher_list:
     predicate:
       single_predicate:
         input:
-          name: inner_input
+          name: outer_input
           typed_config:
             "@type": type.googleapis.com/google.protobuf.StringValue
         value_match:
-          exact: foo
+          exact: value
   )EOF";
 
   envoy::config::common::matcher::v3::Matcher matcher;
@@ -262,12 +370,13 @@ matcher_list:
 
   TestUtility::validate(matcher);
 
-  MatchTreeFactory<TestData> factory(factory_context_);
-
   auto outer_factory = TestDataInputFactory("outer_input", "value");
   auto inner_factory = TestDataInputFactory("inner_input", "foo");
 
-  auto match_tree = factory.create(matcher);
+  auto match_tree = factory_.create(matcher);
+
+  EXPECT_EQ(1, validator_.paths_.size());
+  validator_.expectPaths({{{"value", "foo"}, "google.protobuf.StringValue"}});
 
   const auto result = match_tree->match(TestData());
   EXPECT_EQ(result.match_state_, MatchState::MatchComplete);

@@ -64,9 +64,9 @@ Envoy::Http::FilterFactoryCb MatchWrapperConfig::createFilterFactoryFromProtoTyp
       proto_config.extension_config().typed_config(), context.messageValidationVisitor(), factory);
   auto filter_factory = factory.createFilterFactoryFromProto(*message, prefix, context);
 
-filter_factory.
-  auto match_tree = Matcher::MatchTreeFactory<Envoy::Http::HttpMatchingData>(context).create(
-      proto_config.matcher());
+  filter_factory.auto match_tree =
+      Matcher::MatchTreeFactory<Envoy::Http::HttpMatchingData>(context).create(
+          proto_config.matcher());
 
   return [filter_factory, match_tree](Envoy::Http::FilterChainFactoryCallbacks& callbacks) -> void {
     DelegatingFactoryCallbacks delegated_callbacks(callbacks, match_tree);

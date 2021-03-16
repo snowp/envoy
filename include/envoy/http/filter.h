@@ -8,6 +8,7 @@
 #include "envoy/access_log/access_log.h"
 #include "envoy/common/scope_tracker.h"
 #include "envoy/event/dispatcher.h"
+#include "envoy/extensions/filters/common/dependency/v3/dependency.pb.h"
 #include "envoy/grpc/status.h"
 #include "envoy/http/codec.h"
 #include "envoy/http/header_map.h"
@@ -16,7 +17,6 @@
 #include "envoy/ssl/connection.h"
 #include "envoy/tracing/http_tracer.h"
 #include "envoy/upstream/upstream.h"
-#include "envoy/extensions/filters/common/dependency/v3/dependency.pb.h"
 
 #include "absl/types/optional.h"
 
@@ -1057,10 +1057,8 @@ public:
 
   virtual DataInputGetResult get(const Http::HttpMatchingData& data) PURE;
 
-  virtual envoy::extensions::filters::common::dependency::v3::MatchDependencies::Direction
-  direction() PURE;
-  virtual std::vector<
-      envoy::extensions::filters::common::dependency::v3::MatchDependencies::ResolutionStage>
+  virtual std::vector<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies::
+                          ResolutionRequirement::ResolutionStage>
   requiredStages() PURE;
 };
 } // namespace Matcher
