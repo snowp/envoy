@@ -30,11 +30,16 @@ namespace Matcher {
 struct TrackingTreeValidator : public MatchTreeValidator<TestData> {
 
   absl::Status validatePath(const std::vector<DataInputConstRef<TestData>>& path,
+                            const std::vector<DataInputConstRef<TestData>>& additional_dependencies,
                             const std::string& action_type_url) override {
     PathWithAction path_with_action;
     path_with_action.action_type_url_ = action_type_url;
 
     for (const auto& p : path) {
+      path_with_action.input_values_.push_back(
+          std::string(static_cast<const TestInput&>(p.get()).result_.data_.value_or("")));
+    }
+    for (const auto& p : additional_dependencies) {
       path_with_action.input_values_.push_back(
           std::string(static_cast<const TestInput&>(p.get()).result_.data_.value_or("")));
     }
@@ -54,18 +59,28 @@ struct TrackingTreeValidator : public MatchTreeValidator<TestData> {
   };
 
   void expectPaths(const std::vector<PathWithAction>& paths) {
-    EXPECT_THAT(paths, UnorderedElementsAreArray(paths));
+    EXPECT_THAT(paths_, UnorderedElementsAreArray(paths));
   }
 
   std::vector<PathWithAction> paths_;
 };
 
+std::ostream& operator<<(std::ostream& os, const TrackingTreeValidator::PathWithAction& path) {
+  os << "{" << absl::StrJoin(path.input_values_, ", ") << "}"
+     << " -> " << path.action_type_url_;
+  return os;
+}
+
 class MatcherTest : public ::testing::Test {
 public:
-  MatcherTest() : inject_action_(action_factory_), factory_(factory_context_, validator_) {}
+  MatcherTest()
+      : inject_action_(action_factory_), inject_bool_action_(bool_action_factory_),
+        factory_(factory_context_, validator_) {}
 
   StringActionFactory action_factory_;
+  BoolActionFactory bool_action_factory_;
   Registry::InjectFactory<ActionFactory> inject_action_;
+  Registry::InjectFactory<ActionFactory> inject_bool_action_;
   NiceMock<Server::Configuration::MockFactoryContext> factory_context_;
   TrackingTreeValidator validator_;
   MatchTreeFactory<TestData> factory_;
@@ -274,7 +289,82 @@ matcher_tree:
   EXPECT_EQ(result.match_state_, MatchState::MatchComplete);
   EXPECT_TRUE(result.on_match_.has_value());
   EXPECT_NE(result.on_match_->action_cb_, nullptr);
-} // namespace Matcher
+}
+
+TEST_F(MatcherTest, TestMultipleBranchesWithNoMatch) {
+  const std::string yaml = R"EOF(
+on_no_match:
+  action:
+    name: test_action
+    typed_config:
+      "@type": type.googleapis.com/google.protobuf.BoolValue
+      value: true
+matcher_tree:
+  input:
+    name: outer_input
+    typed_config:
+      "@type": type.googleapis.com/google.protobuf.StringValue
+  exact_match_map:
+    map:
+      outer:
+        matcher:
+          matcher_list:
+            matchers:
+            - on_match:
+                action:
+                  name: test_action
+                  typed_config:
+                    "@type": type.googleapis.com/google.protobuf.StringValue
+                    value: match!!
+              predicate:
+                single_predicate:
+                  input:
+                    name: first_inner
+                    typed_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                  value_match:
+                    exact: first
+      "not-used":
+        matcher:
+          matcher_list:
+            matchers:
+            - on_match:
+                action:
+                  name: test_action
+                  typed_config:
+                    "@type": type.googleapis.com/google.protobuf.StringValue
+                    value: match!!
+              predicate:
+                single_predicate:
+                  input:
+                    name: second_inner
+                    typed_config:
+                      "@type": type.googleapis.com/google.protobuf.StringValue
+                  value_match:
+                    exact: second
+  )EOF";
+
+  envoy::config::common::matcher::v3::Matcher matcher;
+  MessageUtil::loadFromYaml(yaml, matcher, ProtobufMessage::getStrictValidationVisitor());
+
+  TestUtility::validate(matcher);
+
+  auto outer_factory = TestDataInputFactory("outer_input", "outer");
+  auto first_inner_factory = TestDataInputFactory("first_inner", "first");
+  auto second_inner_factory = TestDataInputFactory("second_inner", "second");
+
+  auto match_tree = factory_.create(matcher);
+
+  EXPECT_EQ(3, validator_.paths_.size());
+  validator_.expectPaths({{{"outer", "second"}, "google.protobuf.StringValue"},
+                          {{"outer", "first"}, "google.protobuf.StringValue"},
+                          {{"outer", "second", "first"}, "google.protobuf.BoolValue"}});
+
+  const auto result = match_tree->match(TestData());
+  EXPECT_EQ(result.match_state_, MatchState::MatchComplete);
+  EXPECT_TRUE(result.on_match_.has_value());
+  EXPECT_NE(result.on_match_->action_cb_, nullptr);
+}
 
 TEST_F(MatcherTest, TestOrMatcher) {
   const std::string yaml = R"EOF(
@@ -389,25 +479,25 @@ matcher_list:
 }
 
 TEST_F(MatcherTest, RecursiveMatcherNoMatch) {
-  ListMatcher<TestData> matcher(absl::nullopt);
+  typename ListMatcher<TestData>::Builder match_builder;
 
-  matcher.addMatcher(createSingleMatcher(absl::nullopt, [](auto) { return false; }),
-                     stringOnMatch<TestData>("match"));
+  match_builder.addMatcher(createSingleMatcher(absl::nullopt, [](auto) { return false; }),
+                           stringOnMatch<TestData>("match"));
 
-  const auto recursive_result = evaluateMatch(matcher, TestData());
+  const auto recursive_result = evaluateMatch(*match_builder.build(), TestData());
   EXPECT_EQ(recursive_result.match_state_, MatchState::MatchComplete);
   EXPECT_EQ(recursive_result.result_, nullptr);
 }
 
 TEST_F(MatcherTest, RecursiveMatcherCannotMatch) {
-  ListMatcher<TestData> matcher(absl::nullopt);
+  typename ListMatcher<TestData>::Builder match_builder;
 
-  matcher.addMatcher(createSingleMatcher(
-                         absl::nullopt, [](auto) { return false; },
-                         DataInputGetResult::DataAvailability::NotAvailable),
-                     stringOnMatch<TestData>("match"));
+  match_builder.addMatcher(createSingleMatcher(
+                               absl::nullopt, [](auto) { return false; },
+                               DataInputGetResult::DataAvailability::NotAvailable),
+                           stringOnMatch<TestData>("match"));
 
-  const auto recursive_result = evaluateMatch(matcher, TestData());
+  const auto recursive_result = evaluateMatch(*match_builder.build(), TestData());
   EXPECT_EQ(recursive_result.match_state_, MatchState::UnableToMatch);
   EXPECT_EQ(recursive_result.result_, nullptr);
 }

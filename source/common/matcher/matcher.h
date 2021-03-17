@@ -60,12 +60,15 @@ template <class DataType> class MatchTreeValidator {
 public:
   virtual ~MatchTreeValidator() = default;
 
-  virtual absl::Status validatePath(const std::vector<DataInputConstRef<DataType>>& path,
-                                    const std::string& action_type_url) PURE;
+  virtual absl::Status
+  validatePath(const std::vector<DataInputConstRef<DataType>>& path,
+               const std::vector<DataInputConstRef<DataType>>& additional_dependencies,
+               const std::string& action_type_url) PURE;
 };
 
 template <class DataType> class NullMatchTreeValidator : public MatchTreeValidator<DataType> {
   absl::Status validatePath(const std::vector<DataInputConstRef<DataType>>&,
+                            const std::vector<DataInputConstRef<DataType>>&,
                             const std::string&) override {
     return absl::OkStatus();
   }
@@ -81,14 +84,47 @@ public:
       : factory_context_(factory_context), validator_(validator) {}
 
   MatchTreeSharedPtr<DataType> create(const envoy::config::common::matcher::v3::Matcher& config) {
+    return createInternal(config);
+  }
+
+private:
+  struct PathContext {
+    PathContext(MatchTreeFactory<DataType>& factory, const DataInput<DataType>& input)
+        : factory_(factory) {
+      factory_.current_path_.push_back(std::cref(input));
+    }
+    ~PathContext() { factory_.current_path_.pop_back(); }
+
+    MatchTreeFactory<DataType>& factory_;
+  };
+
+  template <class T>
+  using PathTrackingContext = std::pair<T, std::vector<std::unique_ptr<PathContext>>>;
+
+  struct SubtreeTracker {
+    SubtreeTracker(MatchTreeFactory<DataType>& factory) : factory_(factory), start_itr_(factory.subtree_tracker_.end()) {
+    }
+
+    std::vector<DataInputConstRef<DataType>> subtree() {
+      if (start_itr_ == factory_.subtree_tracker_.end()) {
+        return {};
+      }
+
+      return std::vector<DataInputConstRef<DataType>>(start_itr_, factory_.subtree_tracker_.end());
+    }
+
+    MatchTreeFactory<DataType>& factory_;
+    typename std::vector<DataInputConstRef<DataType>>::iterator start_itr_;
+  };
+
+  MatchTreeSharedPtr<DataType>
+  createInternal(const envoy::config::common::matcher::v3::Matcher& config) {
     switch (config.matcher_type_case()) {
     case envoy::config::common::matcher::v3::Matcher::kMatcherTree: {
-      auto tree_matcher = createTreeMatcher(config);
-      return tree_matcher;
+      return createTreeMatcher(config);
     }
     case envoy::config::common::matcher::v3::Matcher::kMatcherList: {
-      auto list_matcher = createListMatcher(config);
-      return list_matcher;
+      return createListMatcher(config);
     }
     default:
       NOT_REACHED_GCOVR_EXCL_LINE;
@@ -96,40 +132,37 @@ public:
     }
   }
 
-private:
-  //
-  struct Context {
-    Context(MatchTreeFactory<DataType>& factory, const DataInput<DataType>& input)
-        : factory_(factory) {
-      factory_.current_path_.push_back(std::cref(input));
-    }
-    ~Context() { factory_.current_path_.pop_back(); }
-
-    MatchTreeFactory<DataType>& factory_;
-  };
-
-  template <class T>
-  using NodeCreationContext = std::pair<T, std::vector<std::unique_ptr<Context>>>;
-
   MatchTreeSharedPtr<DataType>
   createListMatcher(const envoy::config::common::matcher::v3::Matcher& config) {
-    auto list_matcher =
-        std::make_shared<ListMatcher<DataType>>(createOnMatch(config.on_no_match()));
+    typename ListMatcher<DataType>::Builder builder;
 
+    SubtreeTracker subtree_tracker;
+    std::vector<DataInputConstRef<DataType>> subtree_inputs;
     for (const auto& matcher : config.matcher_list().matchers()) {
       auto field_matcher_context = createFieldMatcher(matcher.predicate());
-      list_matcher->addMatcher(std::move(field_matcher_context.first),
-                               *createOnMatch(matcher.on_match()));
+
+      auto subtree_tracking_on_match = createOnMatch(matcher.on_match(), {});
+      builder.addMatcher(std::move(field_matcher_context.first.first),
+                         *subtree_tracking_on_match.first);
+
+      subtree_tracker_.reserve(subtree_tracker_.size() + subtree_tracking_on_match.second.size());
+      subtree_tracker_.insert(subtree_tracker_.end(), subtree_tracking_on_match.second.begin(),
+                              subtree_tracking_on_match.second.end());
     }
 
-    return list_matcher;
+    builder.setOnNoMatch(createOnMatch(config.on_no_match(), subtree_tracker.subtree()).first);
+
+    return builder.build();
   }
 
-  NodeCreationContext<FieldMatcherPtr<DataType>> createFieldMatcher(
+  PathTrackingContext<FieldMatcherPtr<DataType>> createFieldMatcher(
       const envoy::config::common::matcher::v3::Matcher::MatcherList::Predicate& field_predicate) {
+    std::vector<DataInputConstRef<DataType>> subtree_inputs;
     switch (field_predicate.match_type_case()) {
     case (envoy::config::common::matcher::v3::Matcher::MatcherList::Predicate::kSinglePredicate): {
       auto data_input_context = createDataInput(field_predicate.single_predicate().input());
+      subtree_tracker_.emplace_back(*data_input_context.first);
+
       auto field_matcher = std::make_unique<SingleFieldMatcher<DataType>>(
           std::move(data_input_context.first),
           createInputMatcher(field_predicate.single_predicate()));
@@ -137,32 +170,40 @@ private:
       return {std::move(field_matcher), std::move(data_input_context.second)};
     }
     case (envoy::config::common::matcher::v3::Matcher::MatcherList::Predicate::kOrMatcher): {
-      std::vector<std::unique_ptr<Context>> contexts;
+      std::vector<std::unique_ptr<PathContext>> contexts;
       std::vector<FieldMatcherPtr<DataType>> sub_matchers;
       for (const auto& predicate : field_predicate.or_matcher().predicate()) {
         auto field_matcher_context = createFieldMatcher(predicate);
 
-        for (auto&& c : field_matcher_context.second) {
+        subtree_tracker_.reserve(subtree_tracker_.size() + field_matcher_context.second.size());
+        subtree_tracker_.insert(subtree_tracker_.end(), field_matcher_context.second.begin(),
+                                field_matcher_context.second.end());
+
+        for (auto&& c : field_matcher_context.first.second) {
           contexts.emplace_back(std::move(c));
         }
 
-        sub_matchers.emplace_back(std::move(field_matcher_context.first));
+        sub_matchers.emplace_back(std::move(field_matcher_context.first.first));
       }
 
       return {std::make_unique<AnyFieldMatcher<DataType>>(std::move(sub_matchers)),
               std::move(contexts)};
     }
     case (envoy::config::common::matcher::v3::Matcher::MatcherList::Predicate::kAndMatcher): {
-      std::vector<std::unique_ptr<Context>> contexts;
+      std::vector<std::unique_ptr<PathContext>> contexts;
       std::vector<FieldMatcherPtr<DataType>> sub_matchers;
       for (const auto& predicate : field_predicate.and_matcher().predicate()) {
         auto field_matcher_context = createFieldMatcher(predicate);
 
-        for (auto&& c : field_matcher_context.second) {
+        subtree_tracker_.reserve(subtree_tracker_.size() + field_matcher_context.second.size());
+        subtree_tracker_.insert(subtree_tracker_.end(), field_matcher_context.second.begin(),
+                                field_matcher_context.second.end());
+
+        for (auto&& c : field_matcher_context.first.second) {
           contexts.emplace_back(std::move(c));
         }
 
-        sub_matchers.emplace_back(std::move(field_matcher_context.first));
+        sub_matchers.emplace_back(std::move(field_matcher_context.first.first));
       }
 
       return {std::make_unique<AllFieldMatcher<DataType>>(std::move(sub_matchers)),
@@ -179,15 +220,17 @@ private:
     case envoy::config::common::matcher::v3::Matcher_MatcherTree::kExactMatchMap: {
       auto data_input_context = createDataInput(matcher.matcher_tree().input());
 
-      auto multimap_matcher = std::make_shared<ExactMapMatcher<DataType>>(
-          std::move(data_input_context.first), createOnMatch(matcher.on_no_match()));
+      typename ExactMapMatcher<DataType>::Builder builder(std::move(data_input_context.first));
 
       for (const auto& children : matcher.matcher_tree().exact_match_map().map()) {
-        multimap_matcher->addChild(children.first,
-                                   *MatchTreeFactory::createOnMatch(children.second));
+        auto on_match = createOnMatch(children.second, {});
+
+        builder.addChild(children.first, std::move(on_match));
       }
 
-      return multimap_matcher;
+      builder.setOnNoMatch(createOnMatch(matcher.on_no_match()).first);
+
+      return builder.build();
     }
     case envoy::config::common::matcher::v3::Matcher_MatcherTree::kPrefixMatchMap:
       NOT_IMPLEMENTED_GCOVR_EXCL_LINE;
@@ -197,36 +240,45 @@ private:
       NOT_REACHED_GCOVR_EXCL_LINE;
     }
   }
+
   absl::optional<OnMatch<DataType>>
-  createOnMatch(const envoy::config::common::matcher::v3::Matcher::OnMatch& on_match) {
+  createOnMatch(const envoy::config::common::matcher::v3::Matcher::OnMatch& on_match, const std::vector<DataInputConstRef<DataType>>& subtree) {
     if (on_match.has_matcher()) {
-      return OnMatch<DataType>{{}, create(on_match.matcher())};
+      ENVOY_LOG_MISC(trace, "creating recursive on match matcher");
+
+      auto subtree_with_context = createInternal(on_match.matcher());
+      return OnMatch<DataType>{{}, createInternal(on_match.matcher())};
     } else if (on_match.has_action()) {
       auto& factory = Config::Utility::getAndCheckFactory<ActionFactory>(on_match.action());
       ProtobufTypes::MessagePtr message = Config::Utility::translateAnyToFactoryConfig(
           on_match.action().typed_config(), factory_context_.messageValidationVisitor(), factory);
       auto action = factory.createActionFactoryCb(*message, "", factory_context_);
 
-      auto status = validator_.validatePath(current_path_, factory.configType());
+      auto status =
+          validator_.validatePath(current_path_, subtree, factory.configType());
       if (!status.ok()) {
         throw EnvoyException(fmt::format("match tree validation failed: {}", status));
       }
 
+      ENVOY_LOG_MISC(trace, "created on match with action type {}",
+                     on_match.action().typed_config().type_url());
       return OnMatch<DataType>{factory.createActionFactoryCb(*message, "", factory_context_), {}};
     }
+
+    ENVOY_LOG_MISC(trace, "noop on_match");
 
     return absl::nullopt;
   }
 
-  NodeCreationContext<DataInputPtr<DataType>>
+  PathTrackingContext<DataInputPtr<DataType>>
   createDataInput(const envoy::config::core::v3::TypedExtensionConfig& config) {
     auto& factory = Config::Utility::getAndCheckFactory<DataInputFactory<DataType>>(config);
     ProtobufTypes::MessagePtr message = Config::Utility::translateAnyToFactoryConfig(
         config.typed_config(), factory_context_.messageValidationVisitor(), factory);
     auto input = factory.createDataInput(*message, factory_context_);
 
-    auto context = std::make_unique<Context>(*this, *input);
-    NodeCreationContext<DataInputPtr<DataType>> creation_context;
+    auto context = std::make_unique<PathContext>(*this, *input);
+    PathTrackingContext<DataInputPtr<DataType>> creation_context;
     creation_context.first = std::move(input);
     creation_context.second.emplace_back(std::move(context));
     return creation_context;
@@ -254,6 +306,7 @@ private:
   }
 
   std::vector<DataInputConstRef<DataType>> current_path_;
+  std::vector<DataInputConstRef<DataType>> subtree_tracker_;
   Server::Configuration::FactoryContext& factory_context_;
   MatchTreeValidator<DataType>& validator_;
 };

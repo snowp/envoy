@@ -3,6 +3,7 @@
 #include "envoy/matcher/matcher.h"
 
 #include "common/matcher/field_matcher.h"
+#include <memory>
 
 namespace Envoy {
 namespace Matcher {
@@ -13,7 +14,33 @@ namespace Matcher {
  */
 template <class DataType> class ListMatcher : public MatchTree<DataType> {
 public:
-  explicit ListMatcher(absl::optional<OnMatch<DataType>> on_no_match) : on_no_match_(on_no_match) {}
+  class Builder {
+  public:
+    void addMatcher(FieldMatcherPtr<DataType>&& matcher, OnMatch<DataType> action) {
+      // The OnMatch must be constructed *after* all the children in order to properly account for
+      // all dependent inputs.
+      ASSERT(!on_no_match_);
+
+      matchers_.push_back({std::move(matcher), std::move(action)});
+    }
+    void setOnNoMatch(absl::optional<OnMatch<DataType>>&& on_no_match) {
+      ASSERT(!on_no_match_);
+
+      if (on_no_match) {
+        on_no_match_ = std::make_unique<OnMatch<DataType>>(*on_no_match);
+      }
+    }
+
+    std::unique_ptr<ListMatcher<DataType>> build() {
+      return std::unique_ptr<ListMatcher<DataType>>(new ListMatcher<DataType>(*this));
+    }
+
+  private:
+    std::unique_ptr<OnMatch<DataType>> on_no_match_;
+    std::vector<std::pair<FieldMatcherPtr<DataType>, OnMatch<DataType>>> matchers_;
+
+    friend ListMatcher<DataType>;
+  };
 
   typename MatchTree<DataType>::MatchResult match(const DataType& matching_data) override {
     for (const auto& matcher : matchers_) {
@@ -32,13 +59,14 @@ public:
     return {MatchState::MatchComplete, on_no_match_};
   }
 
-  void addMatcher(FieldMatcherPtr<DataType>&& matcher, OnMatch<DataType> action) {
-    matchers_.push_back({std::move(matcher), std::move(action)});
-  }
-
 private:
-  absl::optional<OnMatch<DataType>> on_no_match_;
-  std::vector<std::pair<FieldMatcherPtr<DataType>, OnMatch<DataType>>> matchers_;
+  explicit ListMatcher(Builder& builder)
+      : on_no_match_(builder.on_no_match_ ? absl::make_optional(std::move(*builder.on_no_match_))
+                                          : absl::nullopt),
+        matchers_(std::move(builder.matchers_)) {}
+
+  const absl::optional<OnMatch<DataType>> on_no_match_;
+  const std::vector<std::pair<FieldMatcherPtr<DataType>, OnMatch<DataType>>> matchers_;
 };
 
 } // namespace Matcher

@@ -75,6 +75,13 @@ struct StringAction : public ActionBase<ProtobufWkt::StringValue> {
   bool operator==(const StringAction& other) const { return string_ == other.string_; }
 };
 
+// An action that evaluates to a proto BoolValue.
+struct BoolAction : public ActionBase<ProtobufWkt::BoolValue> {
+  explicit BoolAction(bool v) : v_(v) {}
+
+  const bool v_;
+};
+
 // Factory for StringAction.
 class StringActionFactory : public ActionFactory {
 public:
@@ -88,6 +95,21 @@ public:
     return std::make_unique<ProtobufWkt::StringValue>();
   }
   std::string name() const override { return "string_action"; }
+};
+
+// Factory for BoolAction.
+class BoolActionFactory : public ActionFactory {
+public:
+  ActionFactoryCb createActionFactoryCb(const Protobuf::Message& config, const std::string&,
+                                        Server::Configuration::FactoryContext&) override {
+    const auto& string = dynamic_cast<const ProtobufWkt::BoolValue&>(config);
+    return [string]() { return std::make_unique<BoolAction>(string.value()); };
+  }
+
+  ProtobufTypes::MessagePtr createEmptyConfigProto() override {
+    return std::make_unique<ProtobufWkt::BoolValue>();
+  }
+  std::string name() const override { return "bool_action"; }
 };
 
 // An InputMatcher that always returns false.
