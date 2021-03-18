@@ -153,25 +153,25 @@ struct TestAction : Matcher::ActionBase<ProtobufWkt::StringValue> {};
 template <class InputType, class ActionType>
 Matcher::MatchTreeSharedPtr<HttpMatchingData> createMatchingTree(const std::string& name,
                                                                  const std::string& value) {
-  auto tree = std::make_shared<Matcher::ExactMapMatcher<HttpMatchingData>>(
-      std::make_unique<InputType>(name), absl::nullopt);
+  typename Matcher::ExactMapMatcher<HttpMatchingData>::Builder builder(
+      std::make_unique<Matching::HttpResponseHeadersDataInput>(name));
 
-  tree->addChild(value, Matcher::OnMatch<HttpMatchingData>{
-                            []() { return std::make_unique<ActionType>(); }, nullptr});
+  builder.addChild(value, Matcher::OnMatch<HttpMatchingData>{
+                              []() { return std::make_unique<ActionType>(); }, nullptr});
 
-  return tree;
+  return builder.build();
 }
 
 Matcher::MatchTreeSharedPtr<HttpMatchingData> createRequestAndResponseMatchingTree() {
-  auto tree = std::make_shared<Matcher::ExactMapMatcher<HttpMatchingData>>(
-      std::make_unique<Matching::HttpResponseHeadersDataInput>("match-header"), absl::nullopt);
+  typename Matcher::ExactMapMatcher<HttpMatchingData>::Builder builder(
+      std::make_unique<Matching::HttpResponseHeadersDataInput>("match-header"));
+  builder.addChild("match",
+                   Matcher::OnMatch<HttpMatchingData>{
+                       []() { return std::make_unique<SkipAction>(); },
+                       createMatchingTree<Matching::HttpRequestHeadersDataInput, SkipAction>(
+                           "match-header", "match")});
 
-  tree->addChild("match", Matcher::OnMatch<HttpMatchingData>{
-                              []() { return std::make_unique<SkipAction>(); },
-                              createMatchingTree<Matching::HttpRequestHeadersDataInput, SkipAction>(
-                                  "match-header", "match")});
-
-  return tree;
+  return builder.build();
 }
 
 TEST_F(FilterManagerTest, MatchTreeSkipActionDecodingHeaders) {

@@ -59,6 +59,13 @@ private:
       callbacks.addStreamFilter(std::make_shared<SetResponseCodeFilter>(filter_config));
     };
   }
+
+  std::unique_ptr<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies> matchDependencies() override {
+    auto deps = std::make_unique<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies>();
+    deps->per_action_resolution_requirement()["envoy.extensions.filters.common.matcher.action.v3.SkipFilter"].set_decode_required_stage(NOT_ALLOWED);
+
+    return deps;
+  }
 };
 
 REGISTER_FACTORY(SetResponseCodeFilterFactory, Server::Configuration::NamedHttpFilterConfigFactory);

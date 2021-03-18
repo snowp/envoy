@@ -48,9 +48,9 @@ public:
             header_as_string_result_->result()};
   }
 
-  std::vector<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies::
-                  ResolutionRequirement::ResolutionStage>
-  requiredStages() override {
+  envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies::ResolutionRequirement::
+      ResolutionStage
+      requiredDecodeStage() override {
     return {stage_};
   }
 

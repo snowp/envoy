@@ -1,4 +1,5 @@
 #include "common/http/match_wrapper/config.h"
+#include "common/http/matching/validator.h"
 
 #include "envoy/http/filter.h"
 #include "envoy/matcher/matcher.h"
@@ -64,9 +65,9 @@ Envoy::Http::FilterFactoryCb MatchWrapperConfig::createFilterFactoryFromProtoTyp
       proto_config.extension_config().typed_config(), context.messageValidationVisitor(), factory);
   auto filter_factory = factory.createFilterFactoryFromProto(*message, prefix, context);
 
-  filter_factory.auto match_tree =
-      Matcher::MatchTreeFactory<Envoy::Http::HttpMatchingData>(context).create(
-          proto_config.matcher());
+  Http::MatchTreeValdiator validator(*filter_factory->matchDependencies());
+  match_tree = Matcher::MatchTreeFactory<Envoy::Http::HttpMatchingData>(context, validator)
+                   .create(proto_config.matcher());
 
   return [filter_factory, match_tree](Envoy::Http::FilterChainFactoryCallbacks& callbacks) -> void {
     DelegatingFactoryCallbacks delegated_callbacks(callbacks, match_tree);

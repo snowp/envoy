@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 
 #include "envoy/config/typed_config.h"
 #include "envoy/extensions/filters/common/dependency/v3/dependency.pb.h"
@@ -214,6 +215,10 @@ public:
   virtual FilterDependenciesPtr dependencies() {
     return std::make_unique<
         envoy::extensions::filters::common::dependency::v3::FilterDependencies>();
+  }
+
+  virtual std::unique_ptr<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies> matchDependencies() {
+    return std::make_unique<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies>();
   }
 };
 

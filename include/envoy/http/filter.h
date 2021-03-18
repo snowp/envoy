@@ -1057,9 +1057,9 @@ public:
 
   virtual DataInputGetResult get(const Http::HttpMatchingData& data) PURE;
 
-  virtual std::vector<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies::
-                          ResolutionRequirement::ResolutionStage>
-  requiredStages() PURE;
+  virtual envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies::
+                          ResolutionRequirement::ResolutionStage
+  requiredDecodeStage() PURE;
 };
 } // namespace Matcher
 

@@ -1,9 +1,10 @@
 #pragma once
 
+#include <memory>
+
 #include "envoy/matcher/matcher.h"
 
 #include "common/matcher/field_matcher.h"
-#include <memory>
 
 namespace Envoy {
 namespace Matcher {

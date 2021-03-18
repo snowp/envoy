@@ -102,8 +102,8 @@ private:
   using PathTrackingContext = std::pair<T, std::vector<std::unique_ptr<PathContext>>>;
 
   struct SubtreeTracker {
-    SubtreeTracker(MatchTreeFactory<DataType>& factory) : factory_(factory), start_itr_(factory.subtree_tracker_.end()) {
-    }
+    SubtreeTracker(MatchTreeFactory<DataType>& factory)
+        : factory_(factory), start_itr_(factory.subtree_tracker_.end()) {}
 
     std::vector<DataInputConstRef<DataType>> subtree() {
       if (start_itr_ == factory_.subtree_tracker_.end()) {
@@ -242,7 +242,8 @@ private:
   }
 
   absl::optional<OnMatch<DataType>>
-  createOnMatch(const envoy::config::common::matcher::v3::Matcher::OnMatch& on_match, const std::vector<DataInputConstRef<DataType>>& subtree) {
+  createOnMatch(const envoy::config::common::matcher::v3::Matcher::OnMatch& on_match,
+                const std::vector<DataInputConstRef<DataType>>& subtree) {
     if (on_match.has_matcher()) {
       ENVOY_LOG_MISC(trace, "creating recursive on match matcher");
 
@@ -254,8 +255,7 @@ private:
           on_match.action().typed_config(), factory_context_.messageValidationVisitor(), factory);
       auto action = factory.createActionFactoryCb(*message, "", factory_context_);
 
-      auto status =
-          validator_.validatePath(current_path_, subtree, factory.configType());
+      auto status = validator_.validatePath(current_path_, subtree, factory.configType());
       if (!status.ok()) {
         throw EnvoyException(fmt::format("match tree validation failed: {}", status));
       }
