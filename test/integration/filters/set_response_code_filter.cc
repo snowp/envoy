@@ -60,9 +60,13 @@ private:
     };
   }
 
-  std::unique_ptr<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies> matchDependencies() override {
-    auto deps = std::make_unique<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies>();
-    deps->per_action_resolution_requirement()["envoy.extensions.filters.common.matcher.action.v3.SkipFilter"].set_decode_required_stage(NOT_ALLOWED);
+  std::unique_ptr<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies>
+  matchDependencies() override {
+    auto deps = std::make_unique<
+        envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies>();
+    deps->per_action_resolution_requirement()
+        ["envoy.extensions.filters.common.matcher.action.v3.SkipFilter"]
+            .set_decode_required_stage(NOT_ALLOWED);
 
     return deps;
   }

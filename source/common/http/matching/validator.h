@@ -1,8 +1,9 @@
 #pragma once
 
+#include "envoy/http/filter.h"
+
 #include "common/common/assert.h"
 #include "common/matcher/matcher.h"
-#include "envoy/http/filter.h"
 
 namespace Envoy {
 namespace Http {

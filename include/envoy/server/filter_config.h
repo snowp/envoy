@@ -217,8 +217,10 @@ public:
         envoy::extensions::filters::common::dependency::v3::FilterDependencies>();
   }
 
-  virtual std::unique_ptr<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies> matchDependencies() {
-    return std::make_unique<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies>();
+  virtual std::unique_ptr<envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies>
+  matchDependencies() {
+    return std::make_unique<
+        envoy::extensions::filters::common::dependency::v3::HTTPMatchDependencies>();
   }
 };
 

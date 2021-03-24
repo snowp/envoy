@@ -32,8 +32,5 @@ envoy_cc_library(
 envoy_cc_library(
     name = "validator_lib",
     hdrs = ["validator.h"],
-    deps = [
-        "//common/matcher:matcher_lib",
-        "@envoy_api//envoy/type/matcher/v3:pkg_cc_proto",
-    ],
+    deps = ["//common/matcher:matcher_lib"],
 )
